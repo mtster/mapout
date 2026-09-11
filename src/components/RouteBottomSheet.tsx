@@ -151,102 +151,64 @@ export const RouteBottomSheet: React.FC<Props> = ({
         <div className="w-10 h-1 rounded-full bg-zinc-600/70" />
       </div>
 
-      {/* COLLAPSED / PEEK VIEW: Small compact bar leaving 90%+ map view unobstructed */}
-      {isCollapsed ? (
+      {/* Top Header Row with Destination Title and Action Controls */}
+      <div className="px-5 pt-1 pb-1 flex items-center justify-between gap-3">
         <div
-          id="route-sheet-collapsed-bar"
-          onClick={() => onToggleCollapse(false)}
-          className="px-5 py-2 flex items-center justify-between gap-3 cursor-pointer hover:bg-white/[0.03] transition active:scale-[0.99]"
+          className="min-w-0 flex-1 cursor-pointer"
+          onClick={() => onToggleCollapse(!isCollapsed)}
         >
-          <div className="min-w-0 flex-1 flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-sky-500/15 text-sky-400 shrink-0">
-              {getModeIcon()}
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-bold text-white truncate leading-tight">
-                {route.destinationName}
-              </h2>
-              <div className="flex items-center gap-2 text-xs text-zinc-400 mt-0.5">
-                {isLoadingRoute ? (
-                  <span className="text-sky-400 font-medium animate-pulse">Updating route...</span>
-                ) : (
-                  <>
-                    <span className="font-semibold text-white">{formatDuration(route.duration)}</span>
-                    <span>•</span>
-                    <span>{formatDistance(route.distance)}</span>
-                    <span>•</span>
-                    <span className="text-emerald-400 font-medium">ETA {formatETA(route.duration)}</span>
-                  </>
-                )}
-              </div>
-            </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-sky-400 font-semibold tracking-wide uppercase">
+            <span>{isCollapsed ? 'Route' : 'Destination'}</span>
           </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleCollapse(false);
-              }}
-              className="p-2 rounded-full text-zinc-300 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95 flex items-center gap-1 text-xs font-semibold px-3"
-              title="Tap to view full route details"
-            >
-              <span>Details</span>
-              <ChevronUp className="w-3.5 h-3.5 text-sky-400" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-              title="Close route"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate leading-tight mt-0.5">
+            {route.destinationName}
+          </h2>
+          {isCollapsed && !isLoadingRoute && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
+              <span className="font-semibold text-white">{formatDuration(route.duration)}</span>
+              <span>•</span>
+              <span>{formatDistance(route.distance)}</span>
+              <span>•</span>
+              <span className="text-emerald-400 font-medium">ETA {formatETA(route.duration)}</span>
+            </div>
+          )}
         </div>
-      ) : (
-        /* EXPANDED VIEW: Complete destination, vehicle mode selection, and navigation actions */
-        <div className="px-5 pt-1 pb-3">
-          {/* Header with destination title, share, collapse chevron, and close */}
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 text-xs text-sky-400 font-medium tracking-wide">
-                <span>DESTINATION</span>
-              </div>
-              <h2 className="text-lg font-bold tracking-tight text-white truncate mt-0.5">
-                {route.destinationName}
-              </h2>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => onToggleCollapse(true)}
-                className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-                title="Collapse sheet to peek view"
-              >
-                <ChevronDown className="w-4 h-4" />
-              </button>
-              {typeof navigator !== 'undefined' && 'share' in navigator && (
-                <button
-                  onClick={handleShare}
-                  className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-                  title="Share route"
-                >
-                  <Share2 className="w-4 h-4" />
-                </button>
-              )}
-              <button
-                onClick={onClose}
-                className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-                title="Close route"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
 
-          {/* Travel Mode Pills - Stays permanently mounted so switching vehicle modes has zero twitching */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => onToggleCollapse(!isCollapsed)}
+            className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
+            title={isCollapsed ? 'Expand route details' : 'Collapse route sheet'}
+          >
+            {isCollapsed ? <ChevronUp className="w-4 h-4 text-sky-400" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          {!isCollapsed && typeof navigator !== 'undefined' && 'share' in navigator && (
+            <button
+              onClick={handleShare}
+              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
+              title="Share route"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
+            title="Close route"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Fluid Expandable Section (Hardware-accelerated CSS Grid transition - 0 battery drain) */}
+      <div
+        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isCollapsed ? 'grid-rows-[0fr] opacity-0 pointer-events-none' : 'grid-rows-[1fr] opacity-100'
+        }`}
+      >
+        <div className="overflow-hidden px-5 pt-2 pb-2">
+          {/* Travel Mode Pills - Permanently mounted so switching vehicle modes has zero twitching */}
           <div className="grid grid-cols-3 gap-2 p-1 rounded-2xl bg-zinc-900/90 border border-white/5 mb-3">
             <button
               onClick={() => onChangeMode('driving')}
@@ -283,17 +245,9 @@ export const RouteBottomSheet: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Route Metrics Row - Fixed height area with no layout shift or twitching */}
-          <div className="min-h-[50px] flex items-center justify-between py-1.5 border-b border-zinc-900">
-            {isLoadingRoute ? (
-              <div className="w-full flex items-center justify-between text-zinc-400 text-xs py-2 animate-pulse">
-                <div className="flex items-center gap-2">
-                  <div className="w-3.5 h-3.5 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
-                  <span className="font-medium text-sky-400">Calculating route for {travelMode}...</span>
-                </div>
-                <div className="h-5 w-16 bg-zinc-800 rounded-full" />
-              </div>
-            ) : (
+          {/* Route Metrics Row - Fixed height area; when vehicle changes, stays empty with no text or spinner until new data arrives */}
+          <div className="min-h-[48px] flex items-center justify-between py-1 border-b border-zinc-900">
+            {isLoadingRoute ? null : (
               <>
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-extrabold tracking-tight text-white">
@@ -311,7 +265,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Action Buttons: 12px gap from Metrics */}
+          {/* Action Buttons: Exactly 12px margin-top */}
           <div className="grid grid-cols-4 gap-2 mt-3">
             <button
               onClick={() => onStartNavigation(false)}
@@ -319,7 +273,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
               disabled={isLoadingRoute}
               className={`col-span-3 flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl font-bold text-sm tracking-wide shadow-[0_0_24px_rgba(56,189,248,0.4)] active:scale-[0.98] transition ${
                 isLoadingRoute
-                  ? 'bg-sky-600/50 text-black/60 cursor-not-allowed'
+                  ? 'bg-sky-600/40 text-black/40 cursor-not-allowed'
                   : 'bg-sky-500 hover:bg-sky-400 text-black'
               }`}
             >
@@ -339,20 +293,20 @@ export const RouteBottomSheet: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Turn-by-Turn Steps Toggle: Exactly 12px separation from Action buttons */}
+          {/* Turn-by-Turn Steps Bar: Separated by exact uniform 12px from Start Navigation */}
           <div className="mt-3">
             <button
               onClick={() => setShowSteps(!showSteps)}
               disabled={isLoadingRoute}
-              className="w-full flex items-center justify-between py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition"
+              className="w-full flex items-center justify-between py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition disabled:opacity-50"
             >
-              <span>
-                {isLoadingRoute ? 'Calculating turn-by-turn steps...' : `${route.steps.length} Turn-by-Turn Steps`}
+              <span className="min-h-[16px]">
+                {isLoadingRoute ? '' : `${route.steps.length} Turn-by-Turn Steps`}
               </span>
-              {showSteps ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+              {!isLoadingRoute && (showSteps ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />)}
             </button>
 
-            {/* Steps dropdown content: Exactly 12px separation from toggle */}
+            {/* Steps dropdown content: Separated by exact uniform 12px from Turn-by-Turn bar */}
             {showSteps && !isLoadingRoute && (
               <div className="mt-3 max-h-56 overflow-y-auto rounded-2xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-900/80">
                 {route.steps.map((step, idx) => (
@@ -372,7 +326,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
             )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };

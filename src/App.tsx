@@ -7,7 +7,7 @@ import { RouteBottomSheet } from './components/RouteBottomSheet';
 import { NavigationHUD } from './components/NavigationHUD';
 import { MapControls } from './components/MapControls';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { calculateRoute, reverseGeocode, calculateHaversineDistance } from './services/mapService';
+import { calculateRoute, reverseGeocode, calculateHaversineDistance, calculateBearing } from './services/mapService';
 import { voiceGuidance } from './utils/voiceGuidance';
 
 export default function App() {
@@ -41,6 +41,9 @@ export default function App() {
   const [isNavigating, setIsNavigating] = useState(false);
   const [isSimulated, setIsSimulated] = useState(false);
   const [isFollowingUser, setIsFollowingUser] = useState(true);
+  const [currentNavHeading, setCurrentNavHeading] = useState<number | null>(null);
+  const [bearing, setBearing] = useState(0);
+  const [recenterTrigger, setRecenterTrigger] = useState(0);
   const isFollowingUserRef = useRef(isFollowingUser);
   useEffect(() => {
     isFollowingUserRef.current = isFollowingUser;
@@ -309,24 +312,20 @@ export default function App() {
     setIsNavigating(true);
     setIsSimulated(simulated);
     setIsFollowingUser(true);
+    setRecenterTrigger((prev) => prev + 1);
     setCurrentStepIndex(0);
     setRemainingDistance(route.distance);
     setRemainingDuration(route.duration);
 
+    // Compute initial road heading so map orients forward immediately
+    if (route.geometry.length > 1) {
+      const initHeading = calculateBearing(route.geometry[0], route.geometry[1]);
+      setCurrentNavHeading(initHeading);
+    }
+
     // Audio guidance must always default to muted when navigation is started
     setIsVoiceEnabled(false);
     voiceGuidance.setEnabled(false);
-
-    // Set map to standard navigation zoom level and position
-    const stdZoom = STANDARD_NAV_ZOOM[travelMode] || 17;
-    const startCoord: LatLng = (userLocation ? [userLocation.lat, userLocation.lng] : route.geometry[0]);
-    if (mapInstance && startCoord) {
-      (mapInstance as any)._isProgrammaticMoving = true;
-      mapInstance.flyTo(startCoord, stdZoom, { duration: 1.0 });
-      setTimeout(() => {
-        if (mapInstance) (mapInstance as any)._isProgrammaticMoving = false;
-      }, 1200);
-    }
 
     if (simulated) {
       startSimulation(route);
@@ -341,6 +340,7 @@ export default function App() {
     setIsSimulated(false);
     setIsFollowingUser(true);
     setActiveNavLocation(null);
+    setCurrentNavHeading(null);
     voiceGuidance.stop();
 
     if (simulationTimerRef.current) {
@@ -380,6 +380,13 @@ export default function App() {
       const currentPos = coords[currIdx];
       setActiveNavLocation(currentPos);
 
+      // Continuously update road heading so road points forward
+      if (currIdx < totalPoints - 1) {
+        const nextPos = coords[currIdx + 1];
+        const roadHeading = calculateBearing(currentPos, nextPos);
+        setCurrentNavHeading(roadHeading);
+      }
+
       const progressFraction = currIdx / totalPoints;
       const remDist = Math.max(0, Math.round(activeRoute.distance * (1 - progressFraction)));
       const remDur = Math.max(0, Math.round(activeRoute.duration * (1 - progressFraction)));
@@ -408,17 +415,22 @@ export default function App() {
         const speedKmh = pos.coords.speed ? pos.coords.speed * 3.6 : 0;
         setCurrentSpeed(speedKmh);
 
+        let roadHeading = pos.coords.heading;
+        if ((roadHeading === null || roadHeading === undefined || isNaN(roadHeading) || roadHeading < 0) && route && route.geometry) {
+          const nextTarget = route.geometry[Math.min(currentStepIndex + 1, route.geometry.length - 1)];
+          roadHeading = calculateBearing(coords, nextTarget);
+        }
+        if (roadHeading !== null && roadHeading !== undefined && !isNaN(roadHeading)) {
+          setCurrentNavHeading(roadHeading);
+        }
+
         setUserLocation({
           lat: coords[0],
           lng: coords[1],
-          heading: pos.coords.heading,
+          heading: roadHeading ?? undefined,
           speed: speedKmh,
           accuracy: pos.coords.accuracy,
         });
-
-        if (mapInstance && isFollowingUserRef.current) {
-          mapInstance.panTo(coords, { animate: true, duration: 0.8 });
-        }
 
         if (route) {
           const destCoords = route.geometry[route.geometry.length - 1];
@@ -463,16 +475,16 @@ export default function App() {
   // Recenter during navigation: resets zoom and camera position strictly to standard navigation setting
   const handleRecenter = useCallback(() => {
     setIsFollowingUser(true);
-    const stdZoom = STANDARD_NAV_ZOOM[travelMode] || 17;
-    const target = activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] as LatLng : null);
-    if (target && mapInstance) {
-      (mapInstance as any)._isProgrammaticMoving = true;
-      mapInstance.flyTo(target, stdZoom, { duration: 0.8 });
-      setTimeout(() => {
-        if (mapInstance) (mapInstance as any)._isProgrammaticMoving = false;
-      }, 900);
+    setRecenterTrigger((prev) => prev + 1);
+  }, []);
+
+  // Reset map rotation back to standard North orientation (bearing = 0)
+  const handleResetNorth = useCallback(() => {
+    if (mapInstance && typeof (mapInstance as any).setBearing === 'function') {
+      (mapInstance as any).setBearing(0);
+      setBearing(0);
     }
-  }, [travelMode, activeNavLocation, userLocation, mapInstance]);
+  }, [mapInstance]);
 
   // Manual next step (helpful in simulation or preview)
   const handleNextStep = () => {
@@ -504,6 +516,10 @@ export default function App() {
         onMapReady={setMapInstance}
         isFollowingUser={isFollowingUser}
         onUserPanOrZoom={handleUserPanOrZoom}
+        targetHeading={currentNavHeading}
+        standardNavZoom={STANDARD_NAV_ZOOM[travelMode]}
+        recenterTrigger={recenterTrigger}
+        onBearingChange={setBearing}
       />
 
       {/* Top Search Bar (idle state) */}
@@ -540,8 +556,9 @@ export default function App() {
         hasUserLocation={!!userLocation}
         onZoomIn={() => mapInstance?.zoomIn()}
         onZoomOut={() => mapInstance?.zoomOut()}
-        onResetNorth={() => mapInstance?.setBearing ? mapInstance.setBearing(0) : mapInstance?.setView(mapInstance.getCenter(), mapInstance.getZoom())}
+        onResetNorth={handleResetNorth}
         isNavigating={isNavigating}
+        bearing={bearing}
       />
 
       {/* Native Route Bottom Sheet (Peek and Expanded states, Drag gestures, Zero-twitch mode switching) */}

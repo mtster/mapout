@@ -19,6 +19,7 @@ interface Props {
   onZoomOut: () => void;
   onResetNorth: () => void;
   isNavigating: boolean;
+  bearing?: number;
 }
 
 export const MapControls: React.FC<Props> = ({
@@ -31,24 +32,37 @@ export const MapControls: React.FC<Props> = ({
   onZoomOut,
   onResetNorth,
   isNavigating,
+  bearing = 0,
 }) => {
   const [showLayerMenu, setShowLayerMenu] = useState(false);
 
   // When actively navigating, some controls are simplified or moved
   if (isNavigating) return null;
 
+  const isRotated = Math.abs(bearing % 360) > 1;
+
   return (
     <div
       className="fixed right-3 sm:right-6 bottom-20 z-[1200] flex flex-col gap-2.5 pointer-events-auto"
       style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 20px)' }}
     >
-      {/* Compass / Reset North */}
+      {/* Compass / Reset North - Button is functional, rotates needle towards True North, and tapping resets rotation to 0 */}
       <button
         onClick={onResetNorth}
-        className="w-11 h-11 rounded-2xl bg-zinc-950/85 border border-white/10 backdrop-blur-2xl shadow-xl flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-900 active:scale-90 transition"
+        id="compass-reset-north-btn"
+        className={`w-11 h-11 rounded-2xl border backdrop-blur-2xl shadow-xl flex items-center justify-center active:scale-90 transition duration-200 ${
+          isRotated
+            ? 'bg-zinc-950 border-sky-400/60 text-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.25)]'
+            : 'bg-zinc-950/85 border-white/10 text-zinc-400 hover:text-white hover:bg-zinc-900'
+        }`}
         title="Reset map orientation to North"
       >
-        <Compass className="w-5 h-5 text-zinc-400 hover:text-sky-400 transition" />
+        <div
+          className="transition-transform duration-200 ease-out"
+          style={{ transform: `rotate(${-bearing}deg)` }}
+        >
+          <Compass className={`w-5 h-5 ${isRotated ? 'text-sky-400' : 'text-zinc-400'}`} />
+        </div>
       </button>
 
       {/* Layer Switcher */}

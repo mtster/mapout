@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
+import 'leaflet-rotate';
 import { LatLng, MapStyle, RouteData, UserLocation } from '../types';
-import { createUserLocationIcon, createDestinationIcon } from '../utils/mapMarkers';
+import { createUserLocationIcon, createNavPuckIcon, createDestinationIcon } from '../utils/mapMarkers';
 
 interface Props {
   userLocation: UserLocation | null;
@@ -16,6 +17,10 @@ interface Props {
   onMapReady?: (map: L.Map) => void;
   isFollowingUser?: boolean;
   onUserPanOrZoom?: () => void;
+  targetHeading?: number | null;
+  standardNavZoom?: number;
+  recenterTrigger?: number;
+  onBearingChange?: (bearing: number) => void;
 }
 
 interface TileDefinition {
@@ -96,6 +101,10 @@ export const MapView: React.FC<Props> = ({
   onMapReady,
   isFollowingUser = true,
   onUserPanOrZoom,
+  targetHeading,
+  standardNavZoom = 17,
+  recenterTrigger,
+  onBearingChange,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -144,6 +153,11 @@ export const MapView: React.FC<Props> = ({
     onMapTapWithDestinationRef.current = onMapTapWithDestination;
   }, [onMapTapWithDestination]);
 
+  const onBearingChangeRef = useRef(onBearingChange);
+  useEffect(() => {
+    onBearingChangeRef.current = onBearingChange;
+  }, [onBearingChange]);
+
   // Helper to mount tile layers
   const setTiles = (map: L.Map, style: MapStyle) => {
     if (baseLayerRef.current) {
@@ -185,6 +199,15 @@ export const MapView: React.FC<Props> = ({
       zoomControl: false,
       doubleClickZoom: false, // Handled exclusively by our custom Google Maps-style gesture
       attributionControl: true,
+      rotate: true,
+      touchRotate: true,
+      rotateControl: false,
+    } as any);
+
+    // Track bearing changes (e.g. from 2-finger twist gesture)
+    map.on('rotate', () => {
+      const b = typeof (map as any).getBearing === 'function' ? (map as any).getBearing() : 0;
+      onBearingChangeRef.current?.(b);
     });
 
     // Add Tile Layers
@@ -202,10 +225,15 @@ export const MapView: React.FC<Props> = ({
     // Google Maps One-Finger / Double-Click & Drag to Zoom
     // Uses Leaflet's EXACT pinch-zoom pipeline (_move with pinch: true)
     // to prevent tile thrashing and eliminate black screen flash.
+    // Enhanced with strict anti-false-positive guards so single-finger
+    // panning and dragging can NEVER be mistaken for double-tap-zoom.
     // ----------------------------------------------------
     let lastTapTime = 0;
     let lastTapX = 0;
     let lastTapY = 0;
+    let pointerDownX = 0;
+    let pointerDownY = 0;
+    let pointerDownTime = 0;
     let isSecondTapHeld = false;
     let isDoubleTapDragging = false;
     let moved = false;
@@ -227,8 +255,6 @@ export const MapView: React.FC<Props> = ({
     const updatePinchZoomFrame = () => {
       rafId = null;
       if (!isDoubleTapDragging || !targetCenter) return;
-      // Use Leaflet's native pinch move which applies smooth GPU matrix transforms
-      // without discarding or re-querying tiles
       (map as any)._move(targetCenter, targetZoom, { pinch: true, round: false }, undefined);
     };
 
@@ -236,13 +262,17 @@ export const MapView: React.FC<Props> = ({
       // Allow primary button or touch only
       if (e.button !== 0 && e.pointerType === 'mouse') return;
 
-      const now = Date.now();
-      const timeDiff = now - lastTapTime;
+      pointerDownX = e.clientX;
+      pointerDownY = e.clientY;
+      pointerDownTime = Date.now();
+
+      const timeDiff = pointerDownTime - lastTapTime;
       const distX = Math.abs(e.clientX - lastTapX);
       const distY = Math.abs(e.clientY - lastTapY);
 
-      if (timeDiff < 380 && distX < 40 && distY < 40) {
-        // Second tap detected within double-tap window!
+      // Strict criteria: only trigger if tap 2 is 60ms-300ms after a CLEAN stationary tap 1,
+      // and within 24px of tap 1
+      if (timeDiff >= 60 && timeDiff <= 300 && distX < 24 && distY < 24) {
         e.preventDefault();
 
         if (pendingClickTimer) {
@@ -269,16 +299,24 @@ export const MapView: React.FC<Props> = ({
         isSecondTapHeld = false;
         isDoubleTapDragging = false;
         moved = false;
-        lastTapX = e.clientX;
-        lastTapY = e.clientY;
       }
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!isSecondTapHeld || !touchPoint || !centerPoint || !pinchStartLatLng) return;
+      if (!isSecondTapHeld) {
+        // If finger moved > 8px while down, user is panning/dragging the map!
+        // Immediately invalidate any pending tap state so the subsequent touch
+        // can NEVER be misidentified as a double tap!
+        const movedDist = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
+        if (movedDist > 8) {
+          lastTapTime = 0;
+        }
+        return;
+      }
+
+      if (!touchPoint || !centerPoint || !pinchStartLatLng) return;
 
       e.preventDefault();
-
       const dy = e.clientY - dragStartY;
 
       if (!isDoubleTapDragging) {
@@ -295,17 +333,11 @@ export const MapView: React.FC<Props> = ({
       }
 
       if (isDoubleTapDragging) {
-        // Drag down (dy > 0) -> Zoom in
-        // Drag up (dy < 0) -> Zoom out
-        // Use identical scale exponential formula as two-finger pinch:
         // 160px vertical drag = factor of 2.0 (1 full zoom level)
         const scale = Math.pow(2, dy / 160);
         targetZoom = (map as any).getScaleZoom(scale, startZoom);
-
-        // Clamp between min and max zoom
         targetZoom = Math.min(20, Math.max(2, targetZoom));
 
-        // Center calculation matching Leaflet TouchZoom: keeps the touched point stationary under finger
         const delta = touchPoint.subtract(centerPoint);
         targetCenter = map.unproject(
           map.project(pinchStartLatLng, targetZoom).subtract(delta),
@@ -363,10 +395,18 @@ export const MapView: React.FC<Props> = ({
         return;
       }
 
-      // Record first tap time and position
-      lastTapTime = Date.now();
-      lastTapX = e.clientX;
-      lastTapY = e.clientY;
+      // Check if touch 1 was a clean, stationary tap:
+      // Must not have moved > 8px and duration must be < 260ms
+      const touchDuration = Date.now() - pointerDownTime;
+      const touchDist = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
+
+      if (touchDist <= 8 && touchDuration < 260) {
+        lastTapTime = Date.now();
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+      } else {
+        lastTapTime = 0;
+      }
     };
 
     const onPointerCancel = () => {
@@ -380,6 +420,7 @@ export const MapView: React.FC<Props> = ({
       isSecondTapHeld = false;
       isDoubleTapDragging = false;
       moved = false;
+      lastTapTime = 0;
     };
 
     // Kill text selection and long-press callout on the map container
@@ -418,7 +459,7 @@ export const MapView: React.FC<Props> = ({
 
     // User drag or zoom during active navigation unlocks the camera so the user can freely explore
     map.on('dragstart', () => {
-      if (isNavigatingRef.current) {
+      if (isNavigatingRef.current && !(map as any)._isProgrammaticMoving) {
         onUserPanOrZoomRef.current?.();
       }
     });
@@ -487,8 +528,7 @@ export const MapView: React.FC<Props> = ({
       return;
     }
 
-    const heading = userLocation?.heading;
-    const icon = createUserLocationIcon(heading);
+    const icon = isNavigating ? createNavPuckIcon() : createUserLocationIcon(userLocation?.heading);
 
     if (userMarkerRef.current) {
       userMarkerRef.current.setLatLng(currentCoords);
@@ -500,12 +540,65 @@ export const MapView: React.FC<Props> = ({
         zIndexOffset: 1000,
       }).addTo(map);
     }
+  }, [userLocation, activeNavLocation, isNavigating]);
 
-    // Auto-center camera only if in active navigation AND user has not panned away
-    if (isNavigating && isFollowingUser) {
+  // Handle camera centering, navigation initial start zoom, and recentering:
+  // When navigation starts, zoom camera to standardNavZoom.
+  // When user clicks recenter, zoom camera to standardNavZoom and center.
+  // When active in navigation and following user, pan camera smoothly.
+  const prevIsNavigatingRef = useRef(isNavigating);
+  const prevRecenterTriggerRef = useRef(recenterTrigger);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const currentCoords = isNavigating && activeNavLocation
+      ? activeNavLocation
+      : userLocation
+      ? [userLocation.lat, userLocation.lng] as LatLng
+      : null;
+
+    if (!currentCoords) return;
+
+    const stdZoom = standardNavZoom || 17;
+    const isNavStarting = !prevIsNavigatingRef.current && isNavigating;
+    const isRecentered = recenterTrigger !== undefined && recenterTrigger !== prevRecenterTriggerRef.current;
+
+    prevIsNavigatingRef.current = isNavigating;
+    prevRecenterTriggerRef.current = recenterTrigger;
+
+    if (isNavStarting || isRecentered) {
+      (map as any)._isProgrammaticMoving = true;
+      map.flyTo(currentCoords, stdZoom, { duration: 0.8 });
+      setTimeout(() => {
+        if (map) (map as any)._isProgrammaticMoving = false;
+      }, 900);
+      return;
+    }
+
+    if (isNavigating && isFollowingUser && !(map as any)._isProgrammaticMoving) {
       map.panTo(currentCoords, { animate: true, duration: 0.6 });
     }
-  }, [userLocation, activeNavLocation, isNavigating, isFollowingUser]);
+  }, [userLocation, activeNavLocation, isNavigating, isFollowingUser, recenterTrigger, standardNavZoom]);
+
+  // Navigation Course-Up Heading Orientation:
+  // When in active navigation and following user, rotate the map so the road points forward (UP).
+  // When navigation stops, smoothly reset bearing to 0 (North up).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || typeof (map as any).setBearing !== 'function') return;
+
+    if (isNavigating && isFollowingUser && targetHeading !== null && targetHeading !== undefined) {
+      // Course-up: align road ahead with 12 o'clock
+      const courseUpBearing = (360 - (targetHeading % 360)) % 360;
+      (map as any).setBearing(courseUpBearing);
+    } else if (!isNavigating) {
+      if ((map as any).getBearing && Math.abs((map as any).getBearing()) > 0.5) {
+        (map as any).setBearing(0);
+      }
+    }
+  }, [isNavigating, isFollowingUser, targetHeading]);
 
   // Update Destination Marker
   useEffect(() => {

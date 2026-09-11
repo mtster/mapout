@@ -323,3 +323,16 @@ export function calculateHaversineDistance(p1: LatLng, p2: LatLng): number {
 
   return Math.round(R * c);
 }
+
+// Calculate bearing between two points in degrees (0 = North, 90 = East, 180 = South, 270 = West)
+export function calculateBearing(start: LatLng, end: LatLng): number {
+  const lat1 = (start[0] * Math.PI) / 180;
+  const lat2 = (end[0] * Math.PI) / 180;
+  const dLng = ((end[1] - start[1]) * Math.PI) / 180;
+
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+}

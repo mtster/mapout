@@ -29,6 +29,25 @@ export function createUserLocationIcon(heading?: number | null): L.DivIcon {
   });
 }
 
+// Create dedicated 3D-styled navigation arrow puck (pointing forward along road in Course-Up mode)
+export function createNavPuckIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'nav-puck-container',
+    html: `
+      <div class="relative flex items-center justify-center w-12 h-12 pointer-events-none">
+        <div class="absolute w-12 h-12 rounded-full bg-sky-400/20"></div>
+        <div class="relative w-8 h-8 rounded-full bg-sky-500 border-[2.5px] border-white shadow-[0_0_20px_rgba(56,189,248,1)] flex items-center justify-center">
+          <svg viewBox="0 0 24 24" fill="#ffffff" class="w-4.5 h-4.5 drop-shadow-md">
+            <polygon points="12,3 20,20 12,16 4,20"/>
+          </svg>
+        </div>
+      </div>
+    `,
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+  });
+}
+
 // Create custom destination pin (sleek black chrome obsidian pin)
 export function createDestinationIcon(title = 'Destination'): L.DivIcon {
   return L.divIcon({

@@ -126,7 +126,7 @@ export const NavigationHUD: React.FC<Props> = ({
             className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-zinc-950/95 border border-sky-400/50 text-white backdrop-blur-2xl shadow-[0_8px_30px_rgba(0,0,0,0.85)] hover:bg-zinc-900 active:scale-95 transition-all text-xs font-bold tracking-wide animate-in fade-in zoom-in-95 duration-200"
             title="Re-center onto current position"
           >
-            <LocateFixed className="w-4 h-4 text-sky-400 animate-pulse" />
+            <LocateFixed className="w-4 h-4 text-sky-400" />
             <span>Re-center</span>
           </button>
         )}
