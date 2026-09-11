@@ -31,6 +31,7 @@ export default function App() {
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [activeNavLocation, setActiveNavLocation] = useState<LatLng | null>(null);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [locationErrorMsg, setLocationErrorMsg] = useState<string | null>(null);
 
   // References for live GPS & Simulation
   const watchIdRef = useRef<number | null>(null);
@@ -70,6 +71,52 @@ export default function App() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
     );
   }, [mapInstance]);
+
+  // Explicit user tap on Locate Me button (above zoom in/out)
+  const handleLocateClick = useCallback(() => {
+    // If location is already known, immediately center and zoom in logically like Google Maps
+    if (userLocation && mapInstance) {
+      mapInstance.flyTo([userLocation.lat, userLocation.lng], 16, { duration: 1.0 });
+    }
+
+    if (!navigator.geolocation) {
+      setLocationErrorMsg('Geolocation is not supported by your browser.');
+      setTimeout(() => setLocationErrorMsg(null), 4000);
+      return;
+    }
+
+    setIsLocating(true);
+    // Explicit user gesture will trigger iOS Safari's native permission prompt
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords: UserLocation = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          heading: pos.coords.heading,
+          speed: pos.coords.speed ? pos.coords.speed * 3.6 : 0,
+          accuracy: pos.coords.accuracy,
+        };
+        setUserLocation(coords);
+        setIsLocating(false);
+        setLocationErrorMsg(null);
+
+        if (mapInstance) {
+          mapInstance.flyTo([coords.lat, coords.lng], 16, { duration: 1.0 });
+          hasCenteredOnUserRef.current = true;
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        if (err.code === 1) { // PERMISSION_DENIED
+          setLocationErrorMsg('Location is blocked. In iOS: Settings > Safari > Location (choose Allow).');
+        } else {
+          setLocationErrorMsg('Could not get GPS signal. Please check your location settings.');
+        }
+        setTimeout(() => setLocationErrorMsg(null), 6000);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, [userLocation, mapInstance]);
 
   // Continuously track real GPS user position
   useEffect(() => {
@@ -388,11 +435,27 @@ export default function App() {
         isNavigating={isNavigating}
       />
 
+      {/* Location Permission Notification Toast */}
+      {locationErrorMsg && (
+        <div
+          id="location-permission-toast"
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-[1400] w-[90%] max-w-md p-3.5 rounded-2xl bg-zinc-950/95 border border-amber-500/30 text-amber-200 text-xs shadow-2xl backdrop-blur-xl flex items-center justify-between gap-3 animate-in slide-in-from-top-4"
+        >
+          <p className="leading-snug">{locationErrorMsg}</p>
+          <button
+            onClick={() => setLocationErrorMsg(null)}
+            className="px-2.5 py-1 rounded-xl bg-zinc-800 text-white hover:bg-zinc-700 text-[11px] font-semibold shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Map Controls: Locate, Orient North, Style, Zoom */}
       <MapControls
         mapStyle={mapStyle}
         onChangeStyle={setMapStyle}
-        onLocateMe={() => requestLocation(true)}
+        onLocateMe={handleLocateClick}
         isLocating={isLocating}
         hasUserLocation={!!userLocation}
         onZoomIn={() => mapInstance?.zoomIn()}

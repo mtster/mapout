@@ -172,8 +172,22 @@ export const MapView: React.FC<Props> = ({
     let isDoubleTapDragging = false;
     let dragStartY = 0;
     let gestureStartZoom = 14;
+    let currentTargetZoom = 14;
+    let anchorLatLng: L.LatLng | null = null;
     let suppressClickUntil = 0;
     let pendingClickTimer: ReturnType<typeof setTimeout> | null = null;
+    let rafId: number | null = null;
+
+    const preventSelection = (e: Event) => {
+      e.preventDefault();
+    };
+
+    const updateZoomFrame = () => {
+      rafId = null;
+      if (!isDoubleTapDragging || !anchorLatLng) return;
+      // Zoom anchored at the tap position smoothly
+      map.setZoomAround(anchorLatLng, currentTargetZoom, { animate: false });
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       // Allow primary button or touch only
@@ -184,9 +198,11 @@ export const MapView: React.FC<Props> = ({
       const distX = Math.abs(e.clientX - lastTapX);
       const distY = Math.abs(e.clientY - lastTapY);
 
-      if (timeDiff < 360 && distX < 35 && distY < 35) {
+      if (timeDiff < 380 && distX < 40 && distY < 40) {
         // Second tap detected within double-tap window!
-        // Immediately cancel any pending single-tap pin drop
+        // Prevent browser text magnifying glass and context selection
+        e.preventDefault();
+
         if (pendingClickTimer) {
           clearTimeout(pendingClickTimer);
           pendingClickTimer = null;
@@ -195,6 +211,8 @@ export const MapView: React.FC<Props> = ({
         isDoubleTapDragging = false;
         dragStartY = e.clientY;
         gestureStartZoom = map.getZoom();
+        currentTargetZoom = gestureStartZoom;
+        anchorLatLng = map.containerPointToLatLng([e.clientX, e.clientY]);
       } else {
         isSecondTapHeld = false;
         isDoubleTapDragging = false;
@@ -206,11 +224,14 @@ export const MapView: React.FC<Props> = ({
     const onPointerMove = (e: PointerEvent) => {
       if (!isSecondTapHeld) return;
 
+      // Prevent native OS text selection & magnifier
+      e.preventDefault();
+
       const dy = e.clientY - dragStartY;
 
       if (!isDoubleTapDragging) {
-        // Activate drag-to-zoom once moved past threshold
-        if (Math.abs(dy) > 5) {
+        // Activate drag-to-zoom once moved past deadzone (6px)
+        if (Math.abs(dy) > 6) {
           isDoubleTapDragging = true;
           map.dragging.disable();
         }
@@ -219,40 +240,61 @@ export const MapView: React.FC<Props> = ({
       if (isDoubleTapDragging) {
         // Drag down (dy > 0) -> Zoom in
         // Drag up (dy < 0) -> Zoom out
-        // Sensitivity: ~1 zoom level per 120 pixels of drag
-        const deltaZoom = dy / 120;
-        const targetZoom = Math.min(20, Math.max(2, gestureStartZoom + deltaZoom));
-        map.setZoom(targetZoom, { animate: false });
+        // Smooth sensitivity: ~1 zoom level per 160 pixels of vertical drag
+        const deltaZoom = dy / 160;
+        currentTargetZoom = Math.min(20, Math.max(2, gestureStartZoom + deltaZoom));
+
+        // Use requestAnimationFrame to batch DOM updates & prevent tile thrashing/blackouts
+        if (rafId === null) {
+          rafId = requestAnimationFrame(updateZoomFrame);
+        }
       }
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+
       if (isDoubleTapDragging) {
-        // Conclude double-tap drag zoom gesture
+        e.preventDefault();
         map.dragging.enable();
+        if (anchorLatLng) {
+          map.setZoomAround(anchorLatLng, currentTargetZoom, { animate: false });
+        }
         isDoubleTapDragging = false;
         isSecondTapHeld = false;
-        suppressClickUntil = Date.now() + 350;
+        suppressClickUntil = Date.now() + 400;
         lastTapTime = 0;
         return;
       }
 
       if (isSecondTapHeld) {
-        // Quick double tap without drag: smoothly zoom in 1 step
-        map.setZoom(Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
+        e.preventDefault();
+        // Quick double tap without drag: smoothly zoom in 1 step around tap location
+        if (anchorLatLng) {
+          map.setZoomAround(anchorLatLng, Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
+        } else {
+          map.setZoom(Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
+        }
         isSecondTapHeld = false;
-        suppressClickUntil = Date.now() + 350;
+        suppressClickUntil = Date.now() + 400;
         lastTapTime = 0;
         return;
       }
 
-      // Record first tap time
+      // Record first tap time and position
       lastTapTime = Date.now();
       lastTapX = e.clientX;
       lastTapY = e.clientY;
     };
 
     const onPointerCancel = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       if (isDoubleTapDragging) {
         map.dragging.enable();
       }
@@ -260,9 +302,12 @@ export const MapView: React.FC<Props> = ({
       isDoubleTapDragging = false;
     };
 
-    container.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
+    // Kill text selection and long-press callout on the map container
+    container.addEventListener('selectstart', preventSelection);
+    container.addEventListener('contextmenu', preventSelection);
+    container.addEventListener('pointerdown', onPointerDown, { passive: false });
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', onPointerUp, { passive: false });
     window.addEventListener('pointercancel', onPointerCancel);
 
     // Map click handler (drop pin) with debounce to avoid collision with double-tap
@@ -291,6 +336,9 @@ export const MapView: React.FC<Props> = ({
 
     return () => {
       if (pendingClickTimer) clearTimeout(pendingClickTimer);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      container.removeEventListener('selectstart', preventSelection);
+      container.removeEventListener('contextmenu', preventSelection);
       container.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);

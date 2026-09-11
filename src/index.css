@@ -54,9 +54,20 @@ body,
   text-decoration: none !important;
 }
 
-/* Tile layer transition */
+/* Tile layer transition and GPU acceleration */
 .leaflet-tile {
-  transition: opacity 0.2s ease-in-out;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  pointer-events: none !important;
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.leaflet-tile-container {
+  will-change: transform;
 }
 
 /* Midnight style tile filter: transforms into pure black OLED navigation map */

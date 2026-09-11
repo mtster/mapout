@@ -45,12 +45,12 @@ export const PWAInstallModal: React.FC<Props> = ({ className = '' }) => {
       {showIOSModal && (
         <div
           id="ios-install-backdrop"
-          className="fixed inset-0 z-[1500] flex items-end sm:items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[1500] flex items-start justify-center p-4 pt-16 sm:pt-20 bg-black/80 backdrop-blur-md overflow-y-auto animate-fade-in"
           onClick={() => setShowIOSModal(false)}
         >
           <div
             id="ios-install-card"
-            className="w-full max-w-sm rounded-3xl bg-zinc-950 border border-zinc-800/80 p-6 text-white shadow-2xl relative mb-4 sm:mb-0"
+            className="w-full max-w-sm rounded-3xl bg-zinc-950 border border-zinc-800/80 p-6 text-white shadow-2xl relative my-2 sm:my-auto animate-in slide-in-from-top-6 duration-300"
             onClick={(e) => e.stopPropagation()}
           >
             <button
