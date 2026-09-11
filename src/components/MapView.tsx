@@ -14,6 +14,8 @@ interface Props {
   onMapClick: (coords: LatLng) => void;
   onMapTapWithDestination?: () => void;
   onMapReady?: (map: L.Map) => void;
+  isFollowingUser?: boolean;
+  onUserPanOrZoom?: () => void;
 }
 
 interface TileDefinition {
@@ -92,6 +94,8 @@ export const MapView: React.FC<Props> = ({
   onMapClick,
   onMapTapWithDestination,
   onMapReady,
+  isFollowingUser = true,
+  onUserPanOrZoom,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -114,6 +118,16 @@ export const MapView: React.FC<Props> = ({
       }
     }
   }, [isNavigating]);
+
+  const isFollowingUserRef = useRef(isFollowingUser);
+  useEffect(() => {
+    isFollowingUserRef.current = isFollowingUser;
+  }, [isFollowingUser]);
+
+  const onUserPanOrZoomRef = useRef(onUserPanOrZoom);
+  useEffect(() => {
+    onUserPanOrZoomRef.current = onUserPanOrZoom;
+  }, [onUserPanOrZoom]);
 
   const hasDestinationRef = useRef(hasDestination);
   useEffect(() => {
@@ -274,6 +288,9 @@ export const MapView: React.FC<Props> = ({
           map.dragging.disable();
           (map as any)._moveStart(true, false);
           moved = true;
+          if (isNavigatingRef.current) {
+            onUserPanOrZoomRef.current?.();
+          }
         }
       }
 
@@ -340,6 +357,9 @@ export const MapView: React.FC<Props> = ({
         isSecondTapHeld = false;
         suppressClickUntil = Date.now() + 400;
         lastTapTime = 0;
+        if (isNavigatingRef.current) {
+          onUserPanOrZoomRef.current?.();
+        }
         return;
       }
 
@@ -394,6 +414,19 @@ export const MapView: React.FC<Props> = ({
         }
         pendingClickTimer = null;
       }, 220);
+    });
+
+    // User drag or zoom during active navigation unlocks the camera so the user can freely explore
+    map.on('dragstart', () => {
+      if (isNavigatingRef.current) {
+        onUserPanOrZoomRef.current?.();
+      }
+    });
+
+    map.on('zoomstart', () => {
+      if (isNavigatingRef.current && !(map as any)._isProgrammaticMoving) {
+        onUserPanOrZoomRef.current?.();
+      }
     });
 
     // ResizeObserver ensures the map continuously and dynamically fills the entire screen
@@ -468,11 +501,11 @@ export const MapView: React.FC<Props> = ({
       }).addTo(map);
     }
 
-    // Auto-center camera if in active navigation
-    if (isNavigating) {
+    // Auto-center camera only if in active navigation AND user has not panned away
+    if (isNavigating && isFollowingUser) {
       map.panTo(currentCoords, { animate: true, duration: 0.6 });
     }
-  }, [userLocation, activeNavLocation, isNavigating]);
+  }, [userLocation, activeNavLocation, isNavigating, isFollowingUser]);
 
   // Update Destination Marker
   useEffect(() => {

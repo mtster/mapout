@@ -26,6 +26,7 @@ interface Props {
   onToggleVoice: () => void;
   onEndNavigation: () => void;
   onRecenter: () => void;
+  showRecenter: boolean;
   isSimulated: boolean;
   onNextStep?: () => void;
 }
@@ -40,6 +41,7 @@ export const NavigationHUD: React.FC<Props> = ({
   onToggleVoice,
   onEndNavigation,
   onRecenter,
+  showRecenter,
   isSimulated,
   onNextStep,
 }) => {
@@ -111,37 +113,49 @@ export const NavigationHUD: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Floating Recenter & Controls Button */}
+      {/* Floating Re-center & Controls Buttons */}
       <div
-        className="fixed right-4 bottom-32 z-[1300] flex flex-col gap-2 pointer-events-auto"
-        style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 110px)' }}
+        className="fixed right-4 z-[1300] flex flex-col items-end gap-2 pointer-events-auto"
+        style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 12px) + 82px)' }}
       >
-        <button
-          onClick={onRecenter}
-          className="p-3.5 rounded-2xl bg-zinc-950/90 border border-white/15 text-white backdrop-blur-2xl shadow-xl hover:bg-zinc-900 active:scale-90 transition"
-          title="Re-center onto current position"
-        >
-          <LocateFixed className="w-5 h-5 text-sky-400" />
-        </button>
+        {/* Re-center Button - ONLY shown when user manually drags or zooms the map away from navigation position */}
+        {showRecenter && (
+          <button
+            onClick={onRecenter}
+            id="nav-recenter-btn"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-zinc-950/95 border border-sky-400/50 text-white backdrop-blur-2xl shadow-[0_8px_30px_rgba(0,0,0,0.85)] hover:bg-zinc-900 active:scale-95 transition-all text-xs font-bold tracking-wide animate-in fade-in zoom-in-95 duration-200"
+            title="Re-center onto current position"
+          >
+            <LocateFixed className="w-4 h-4 text-sky-400 animate-pulse" />
+            <span>Re-center</span>
+          </button>
+        )}
 
         {isSimulated && onNextStep && (
           <button
             onClick={onNextStep}
-            className="p-3.5 rounded-2xl bg-zinc-950/90 border border-white/15 text-white backdrop-blur-2xl shadow-xl hover:bg-zinc-900 active:scale-90 transition"
+            id="nav-sim-next-btn"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-full bg-zinc-950/90 border border-white/15 text-white backdrop-blur-2xl shadow-xl hover:bg-zinc-900 active:scale-95 transition text-xs font-semibold"
             title="Advance to next step"
           >
-            <ChevronRight className="w-5 h-5 text-emerald-400" />
+            <ChevronRight className="w-4 h-4 text-emerald-400" />
+            <span>Next Step</span>
           </button>
         )}
       </div>
 
-      {/* Bottom Navigation Dashboard HUD */}
+      {/* Bottom Navigation Dashboard HUD: Flush docked to bottom edge to eliminate blank bottom space */}
       <div
         id="nav-bottom-hud"
-        className="fixed bottom-0 left-0 right-0 z-[1300] pointer-events-auto"
-        style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}
+        className="fixed bottom-0 left-0 right-0 z-[1300] pointer-events-auto bg-zinc-950/95 backdrop-blur-3xl border-t border-white/15 shadow-[0_-12px_48px_rgba(0,0,0,0.95)] sm:left-6 sm:right-auto sm:w-[450px] sm:bottom-4 sm:rounded-3xl sm:border"
+        style={{
+          paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)',
+          paddingTop: '12px',
+          paddingLeft: '16px',
+          paddingRight: '16px',
+        }}
       >
-        <div className="mx-3 sm:mx-6 rounded-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/15 p-4 shadow-[0_-12px_48px_rgba(0,0,0,0.9)] flex items-center justify-between gap-3 text-white">
+        <div className="w-full flex items-center justify-between gap-3 text-white">
           {/* Metrics Column: ETA, Remaining, Speed */}
           <div className="flex items-center gap-4 sm:gap-6 min-w-0">
             {/* ETA */}

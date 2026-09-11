@@ -40,6 +40,12 @@ export default function App() {
   // Turn-by-Turn Navigation state: Audio guidance defaults to MUTED on start
   const [isNavigating, setIsNavigating] = useState(false);
   const [isSimulated, setIsSimulated] = useState(false);
+  const [isFollowingUser, setIsFollowingUser] = useState(true);
+  const isFollowingUserRef = useRef(isFollowingUser);
+  useEffect(() => {
+    isFollowingUserRef.current = isFollowingUser;
+  }, [isFollowingUser]);
+
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [remainingDistance, setRemainingDistance] = useState(0);
   const [remainingDuration, setRemainingDuration] = useState(0);
@@ -286,12 +292,23 @@ export default function App() {
     stopNavigation();
   };
 
+  // Standard zoom levels for turn-by-turn navigation (cleverly chosen for each travel mode)
+  // Driving: 17 - displays ~150m ahead with cross streets and intersection turn indicators
+  // Cycling: 17.5 - optimal for bike path turns and road details
+  // Walking: 18 - street/sidewalk resolution with building outlines
+  const STANDARD_NAV_ZOOM: Record<TravelMode, number> = {
+    driving: 17,
+    cycling: 17.5,
+    walking: 18,
+  };
+
   // 8. Start Navigation (Real GPS or Simulated)
   const handleStartNavigation = (simulated: boolean) => {
     if (!route || !route.geometry || route.geometry.length === 0) return;
 
     setIsNavigating(true);
     setIsSimulated(simulated);
+    setIsFollowingUser(true);
     setCurrentStepIndex(0);
     setRemainingDistance(route.distance);
     setRemainingDuration(route.duration);
@@ -299,6 +316,17 @@ export default function App() {
     // Audio guidance must always default to muted when navigation is started
     setIsVoiceEnabled(false);
     voiceGuidance.setEnabled(false);
+
+    // Set map to standard navigation zoom level and position
+    const stdZoom = STANDARD_NAV_ZOOM[travelMode] || 17;
+    const startCoord: LatLng = (userLocation ? [userLocation.lat, userLocation.lng] : route.geometry[0]);
+    if (mapInstance && startCoord) {
+      (mapInstance as any)._isProgrammaticMoving = true;
+      mapInstance.flyTo(startCoord, stdZoom, { duration: 1.0 });
+      setTimeout(() => {
+        if (mapInstance) (mapInstance as any)._isProgrammaticMoving = false;
+      }, 1200);
+    }
 
     if (simulated) {
       startSimulation(route);
@@ -311,6 +339,7 @@ export default function App() {
   const stopNavigation = () => {
     setIsNavigating(false);
     setIsSimulated(false);
+    setIsFollowingUser(true);
     setActiveNavLocation(null);
     voiceGuidance.stop();
 
@@ -387,7 +416,7 @@ export default function App() {
           accuracy: pos.coords.accuracy,
         });
 
-        if (mapInstance) {
+        if (mapInstance && isFollowingUserRef.current) {
           mapInstance.panTo(coords, { animate: true, duration: 0.8 });
         }
 
@@ -424,13 +453,26 @@ export default function App() {
     voiceGuidance.setEnabled(next);
   };
 
-  // Recenter during navigation
-  const handleRecenter = () => {
+  // User manually panned or zoomed the map away during navigation
+  const handleUserPanOrZoom = useCallback(() => {
+    if (isNavigating) {
+      setIsFollowingUser(false);
+    }
+  }, [isNavigating]);
+
+  // Recenter during navigation: resets zoom and camera position strictly to standard navigation setting
+  const handleRecenter = useCallback(() => {
+    setIsFollowingUser(true);
+    const stdZoom = STANDARD_NAV_ZOOM[travelMode] || 17;
     const target = activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] as LatLng : null);
     if (target && mapInstance) {
-      mapInstance.flyTo(target, 17, { duration: 0.8 });
+      (mapInstance as any)._isProgrammaticMoving = true;
+      mapInstance.flyTo(target, stdZoom, { duration: 0.8 });
+      setTimeout(() => {
+        if (mapInstance) (mapInstance as any)._isProgrammaticMoving = false;
+      }, 900);
     }
-  };
+  }, [travelMode, activeNavLocation, userLocation, mapInstance]);
 
   // Manual next step (helpful in simulation or preview)
   const handleNextStep = () => {
@@ -444,7 +486,7 @@ export default function App() {
   };
 
   return (
-    <main className="fixed inset-0 w-full h-full h-[100dvh] overflow-hidden bg-black text-white select-none">
+    <main className="fixed inset-0 w-full h-full overflow-hidden bg-black text-white select-none">
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
@@ -460,6 +502,8 @@ export default function App() {
         onMapClick={handleMapClick}
         onMapTapWithDestination={handleMapTapWithDestination}
         onMapReady={setMapInstance}
+        isFollowingUser={isFollowingUser}
+        onUserPanOrZoom={handleUserPanOrZoom}
       />
 
       {/* Top Search Bar (idle state) */}
@@ -525,6 +569,7 @@ export default function App() {
           onToggleVoice={handleToggleVoice}
           onEndNavigation={stopNavigation}
           onRecenter={handleRecenter}
+          showRecenter={!isFollowingUser}
           isSimulated={isSimulated}
           onNextStep={isSimulated ? handleNextStep : undefined}
         />
