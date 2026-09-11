@@ -36,8 +36,9 @@ export default function App() {
   const watchIdRef = useRef<number | null>(null);
   const simulationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const simIndexRef = useRef(0);
+  const hasCenteredOnUserRef = useRef(false);
 
-  // 1. Initial Location detection
+  // 1. Initial Location detection and continuous GPS watching
   const requestLocation = useCallback((forceCenter = false) => {
     if (!navigator.geolocation) {
       console.warn('Geolocation not supported by browser.');
@@ -57,35 +58,95 @@ export default function App() {
         setUserLocation(coords);
         setIsLocating(false);
 
-        if (forceCenter && mapInstance) {
+        if ((forceCenter || !hasCenteredOnUserRef.current) && mapInstance) {
           mapInstance.flyTo([coords.lat, coords.lng], 16, { duration: 1.2 });
+          hasCenteredOnUserRef.current = true;
         }
       },
       (err) => {
         console.warn('Geolocation error / permission denied:', err.message);
         setIsLocating(false);
-        // Fallback to default city center if none exists yet
-        if (!userLocation) {
-          setUserLocation({ lat: 40.7128, lng: -74.006 }); // NYC
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+    );
+  }, [mapInstance]);
+
+  // Continuously track real GPS user position
+  useEffect(() => {
+    requestLocation(true);
+
+    if (!navigator.geolocation) return;
+
+    const globalWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords: UserLocation = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          heading: pos.coords.heading,
+          speed: pos.coords.speed ? pos.coords.speed * 3.6 : 0,
+          accuracy: pos.coords.accuracy,
+        };
+        setUserLocation(coords);
+        setIsLocating(false);
+
+        if (!hasCenteredOnUserRef.current && mapInstance) {
+          mapInstance.flyTo([coords.lat, coords.lng], 16, { duration: 1.2 });
+          hasCenteredOnUserRef.current = true;
         }
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      (err) => {
+        console.warn('Continuous GPS watch error:', err.message);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
-  }, [mapInstance, userLocation]);
 
-  useEffect(() => {
-    requestLocation(false);
-  }, [requestLocation]);
+    return () => {
+      navigator.geolocation.clearWatch(globalWatchId);
+    };
+  }, [mapInstance, requestLocation]);
 
   // 2. Route calculation when destination or travel mode changes
   const fetchRoute = useCallback(
     async (destCoords: LatLng, destName: string, mode: TravelMode) => {
-      // Starting point: user's location or default near destination
-      const startPoint: LatLng = userLocation
-        ? [userLocation.lat, userLocation.lng]
-        : [destCoords[0] - 0.015, destCoords[1] - 0.015];
-
       setIsLoadingRoute(true);
+
+      // Real user starting point
+      let startPoint: LatLng | null = userLocation ? [userLocation.lat, userLocation.lng] : null;
+
+      // If user location not available yet, attempt immediate high-accuracy fix
+      if (!startPoint && navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 6000,
+              maximumAge: 10000,
+            });
+          });
+          const realCoords: UserLocation = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            heading: pos.coords.heading,
+            speed: pos.coords.speed ? pos.coords.speed * 3.6 : 0,
+            accuracy: pos.coords.accuracy,
+          };
+          setUserLocation(realCoords);
+          startPoint = [realCoords.lat, realCoords.lng];
+        } catch (e) {
+          console.warn('Real GPS not yet available, falling back to map center');
+        }
+      }
+
+      // Fallback only if GPS completely unavailable/denied in browser
+      if (!startPoint) {
+        if (mapInstance) {
+          const center = mapInstance.getCenter();
+          startPoint = [center.lat, center.lng];
+        } else {
+          startPoint = [destCoords[0] - 0.015, destCoords[1] - 0.015];
+        }
+      }
+
       try {
         const calculated = await calculateRoute(startPoint, destCoords, mode, destName);
         setRoute(calculated);
@@ -99,7 +160,7 @@ export default function App() {
         setIsLoadingRoute(false);
       }
     },
-    [userLocation]
+    [userLocation, mapInstance]
   );
 
   // 3. User selects a place from Search

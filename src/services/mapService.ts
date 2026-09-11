@@ -293,10 +293,12 @@ export function formatDuration(seconds: number): string {
   return remainingMins > 0 ? `${hours} h ${remainingMins} min` : `${hours} h`;
 }
 
-// Format ETA timestamp (e.g., "5:42 PM")
+// Format ETA timestamp in strict 24-hour format (e.g., "17:42", "09:15")
 export function formatETA(durationSeconds: number): string {
   const arrival = new Date(Date.now() + durationSeconds * 1000);
-  return arrival.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const hours = String(arrival.getHours()).padStart(2, '0');
+  const minutes = String(arrival.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
 }
 
 // Haversine distance in meters

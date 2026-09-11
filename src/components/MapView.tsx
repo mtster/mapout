@@ -25,25 +25,28 @@ const cartoKey = typeof import.meta !== 'undefined' && import.meta.env?.VITE_CAR
 
 // 100% Free, zero watermark, no API key required default basemaps
 const TILE_DEFINITIONS: Record<MapStyle, TileDefinition> = {
-  // Obsidian Dark: Esri World Dark Gray Canvas (or CARTO if user provided key)
+  // Obsidian Dark: Esri World Dark Gray Canvas with maxNativeZoom to avoid gray "Map data not available" tiles
   dark: cartoKey
     ? {
         url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${cartoKey}`,
         options: {
           subdomains: 'abcd',
           maxZoom: 20,
+          maxNativeZoom: 20,
           attribution: '&copy; CARTO &copy; OpenStreetMap',
         },
       }
     : {
         url: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         options: {
-          maxZoom: 19,
+          maxZoom: 20,
+          maxNativeZoom: 16, // Server natively hosts up to zoom 16; Leaflet interpolates beyond
           attribution: '&copy; Esri, HERE, Garmin, OpenStreetMap contributors',
         },
         referenceUrl: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
         referenceOptions: {
-          maxZoom: 19,
+          maxZoom: 20,
+          maxNativeZoom: 16,
           pane: 'tilePane',
           className: 'tile-reference',
         },
@@ -52,7 +55,8 @@ const TILE_DEFINITIONS: Record<MapStyle, TileDefinition> = {
   midnight: {
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     options: {
-      maxZoom: 19,
+      maxZoom: 20,
+      maxNativeZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       className: 'tile-midnight',
     },
@@ -61,12 +65,14 @@ const TILE_DEFINITIONS: Record<MapStyle, TileDefinition> = {
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     options: {
-      maxZoom: 19,
+      maxZoom: 20,
+      maxNativeZoom: 18,
       attribution: '&copy; Esri, Maxar, Earthstar Geographics',
     },
     referenceUrl: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
     referenceOptions: {
-      maxZoom: 19,
+      maxZoom: 20,
+      maxNativeZoom: 16,
       pane: 'tilePane',
       className: 'tile-reference',
     },
@@ -92,6 +98,24 @@ export const MapView: React.FC<Props> = ({
   const routePolylineBgRef = useRef<L.Polyline | null>(null);
   const routePolylineFgRef = useRef<L.Polyline | null>(null);
 
+  // Fresh mutable refs to avoid stale closures in listeners
+  const isNavigatingRef = useRef(isNavigating);
+  useEffect(() => {
+    isNavigatingRef.current = isNavigating;
+    if (destinationMarkerRef.current) {
+      if (isNavigating) {
+        destinationMarkerRef.current.dragging?.disable();
+      } else {
+        destinationMarkerRef.current.dragging?.enable();
+      }
+    }
+  }, [isNavigating]);
+
+  const onMapClickRef = useRef(onMapClick);
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
+
   // Helper to mount tile layers
   const setTiles = (map: L.Map, style: MapStyle) => {
     if (baseLayerRef.current) {
@@ -116,32 +140,161 @@ export const MapView: React.FC<Props> = ({
 
   // Initialize Map
   useEffect(() => {
-    if (!mapContainerRef.current || mapInstanceRef.current) return;
+    const container = mapContainerRef.current;
+    if (!container || mapInstanceRef.current) return;
 
-    // Initial center: user location or default (Paris / London / NYC coordinates)
+    // Initial center: user location or default NYC
     const initialCenter: LatLng = userLocation
       ? [userLocation.lat, userLocation.lng]
-      : [40.7128, -74.006]; // Default NYC coordinates
+      : [40.7128, -74.006];
 
-    const map = L.map(mapContainerRef.current, {
+    const map = L.map(container, {
       center: initialCenter,
       zoom: 14,
+      minZoom: 2,
+      maxZoom: 20,
+      zoomSnap: 0.1, // Smooth fractional zoom like Google Maps
       zoomControl: false,
+      doubleClickZoom: false, // Handled exclusively by our custom Google Maps-style gesture
       attributionControl: true,
     });
 
     // Add Tile Layers
     setTiles(map, mapStyle);
 
-    // Map click handler (drop pin)
+    // ----------------------------------------------------
+    // Google Maps One-Finger / Double-Click & Drag to Zoom
+    // ----------------------------------------------------
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+    let isSecondTapHeld = false;
+    let isDoubleTapDragging = false;
+    let dragStartY = 0;
+    let gestureStartZoom = 14;
+    let suppressClickUntil = 0;
+    let pendingClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const onPointerDown = (e: PointerEvent) => {
+      // Allow primary button or touch only
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+      const now = Date.now();
+      const timeDiff = now - lastTapTime;
+      const distX = Math.abs(e.clientX - lastTapX);
+      const distY = Math.abs(e.clientY - lastTapY);
+
+      if (timeDiff < 360 && distX < 35 && distY < 35) {
+        // Second tap detected within double-tap window!
+        // Immediately cancel any pending single-tap pin drop
+        if (pendingClickTimer) {
+          clearTimeout(pendingClickTimer);
+          pendingClickTimer = null;
+        }
+        isSecondTapHeld = true;
+        isDoubleTapDragging = false;
+        dragStartY = e.clientY;
+        gestureStartZoom = map.getZoom();
+      } else {
+        isSecondTapHeld = false;
+        isDoubleTapDragging = false;
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!isSecondTapHeld) return;
+
+      const dy = e.clientY - dragStartY;
+
+      if (!isDoubleTapDragging) {
+        // Activate drag-to-zoom once moved past threshold
+        if (Math.abs(dy) > 5) {
+          isDoubleTapDragging = true;
+          map.dragging.disable();
+        }
+      }
+
+      if (isDoubleTapDragging) {
+        // Drag down (dy > 0) -> Zoom in
+        // Drag up (dy < 0) -> Zoom out
+        // Sensitivity: ~1 zoom level per 120 pixels of drag
+        const deltaZoom = dy / 120;
+        const targetZoom = Math.min(20, Math.max(2, gestureStartZoom + deltaZoom));
+        map.setZoom(targetZoom, { animate: false });
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (isDoubleTapDragging) {
+        // Conclude double-tap drag zoom gesture
+        map.dragging.enable();
+        isDoubleTapDragging = false;
+        isSecondTapHeld = false;
+        suppressClickUntil = Date.now() + 350;
+        lastTapTime = 0;
+        return;
+      }
+
+      if (isSecondTapHeld) {
+        // Quick double tap without drag: smoothly zoom in 1 step
+        map.setZoom(Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
+        isSecondTapHeld = false;
+        suppressClickUntil = Date.now() + 350;
+        lastTapTime = 0;
+        return;
+      }
+
+      // Record first tap time
+      lastTapTime = Date.now();
+      lastTapX = e.clientX;
+      lastTapY = e.clientY;
+    };
+
+    const onPointerCancel = () => {
+      if (isDoubleTapDragging) {
+        map.dragging.enable();
+      }
+      isSecondTapHeld = false;
+      isDoubleTapDragging = false;
+    };
+
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+
+    // Map click handler (drop pin) with debounce to avoid collision with double-tap
     map.on('click', (e: L.LeafletMouseEvent) => {
-      onMapClick([e.latlng.lat, e.latlng.lng]);
+      // Strictly prevent dropping pins during navigation
+      if (isNavigatingRef.current) return;
+      if (Date.now() < suppressClickUntil) return;
+
+      const clickedCoords: LatLng = [e.latlng.lat, e.latlng.lng];
+
+      if (pendingClickTimer) {
+        clearTimeout(pendingClickTimer);
+      }
+
+      // 220ms grace window: if second tap begins, timer is cancelled
+      pendingClickTimer = setTimeout(() => {
+        if (!isNavigatingRef.current && Date.now() >= suppressClickUntil) {
+          onMapClickRef.current(clickedCoords);
+        }
+        pendingClickTimer = null;
+      }, 220);
     });
 
     mapInstanceRef.current = map;
     if (onMapReady) onMapReady(map);
 
     return () => {
+      if (pendingClickTimer) clearTimeout(pendingClickTimer);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -212,21 +365,27 @@ export const MapView: React.FC<Props> = ({
     if (destinationMarkerRef.current) {
       destinationMarkerRef.current.setLatLng(destCoords);
       destinationMarkerRef.current.setIcon(icon);
+      if (isNavigating) {
+        destinationMarkerRef.current.dragging?.disable();
+      } else {
+        destinationMarkerRef.current.dragging?.enable();
+      }
     } else {
       destinationMarkerRef.current = L.marker(destCoords, {
         icon,
-        draggable: true,
+        draggable: !isNavigating,
         zIndexOffset: 900,
       }).addTo(map);
 
       // Handle dragging the destination pin
       destinationMarkerRef.current.on('dragend', (e) => {
+        if (isNavigatingRef.current) return;
         const marker = e.target;
         const pos = marker.getLatLng();
-        onMapClick([pos.lat, pos.lng]);
+        onMapClickRef.current([pos.lat, pos.lng]);
       });
     }
-  }, [destination, onMapClick]);
+  }, [destination, isNavigating]);
 
   // Update Route Polylines
   useEffect(() => {
