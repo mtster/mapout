@@ -35,14 +35,27 @@ export const SearchBar: React.FC<Props> = ({
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync with selected destination name if changed externally
+  const userLocationRef = useRef(userLocation);
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+  }, [userLocation]);
+
+  // Sync with selected destination name if changed externally, or clear query when cleared
   useEffect(() => {
     if (selectedDestination) {
       setQuery(selectedDestination.name);
+      setHasInteracted(false);
+      setIsSearching(false);
+      setIsOpen(false);
+    } else {
+      setQuery('');
+      setHasInteracted(false);
+      setIsSearching(false);
+      setResults([]);
     }
   }, [selectedDestination]);
 
-  // Debounced search
+  // Debounced search - only triggered by user typing/interaction, NOT by GPS coordinate updates
   useEffect(() => {
     if (!hasInteracted) return;
 
@@ -60,7 +73,7 @@ export const SearchBar: React.FC<Props> = ({
     setIsSearching(true);
     debounceTimerRef.current = setTimeout(async () => {
       try {
-        const places = await searchPlaces(trimmed, userLocation || undefined);
+        const places = await searchPlaces(trimmed, userLocationRef.current || undefined);
         setResults(places);
       } catch (err) {
         console.error('Search error:', err);
@@ -72,7 +85,7 @@ export const SearchBar: React.FC<Props> = ({
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [query, hasInteracted, userLocation]);
+  }, [query, hasInteracted]);
 
   // Close dropdown on click outside
   useEffect(() => {

@@ -199,15 +199,18 @@ export const MapView: React.FC<Props> = ({
       zoomControl: false,
       doubleClickZoom: false, // Handled exclusively by our custom Google Maps-style gesture
       attributionControl: true,
+      preferCanvas: true, // Canvas renderer is natively transformed and anchored in rotatePane
       rotate: true,
       touchRotate: true,
       rotateControl: false,
     } as any);
 
-    // Track bearing changes (e.g. from 2-finger twist gesture)
+    // Track bearing changes (e.g. from 2-finger twist gesture or course-up navigation)
     map.on('rotate', () => {
       const b = typeof (map as any).getBearing === 'function' ? (map as any).getBearing() : 0;
       onBearingChangeRef.current?.(b);
+      if (routePolylineBgRef.current) routePolylineBgRef.current.redraw();
+      if (routePolylineFgRef.current) routePolylineFgRef.current.redraw();
     });
 
     // Add Tile Layers
@@ -658,8 +661,12 @@ export const MapView: React.FC<Props> = ({
 
     if (!route || !route.geometry || route.geometry.length < 2) return;
 
+    // Use dedicated Canvas renderer attached to map's rotatePane
+    const canvasRenderer = L.canvas();
+
     // Background casing (dark / glowing outline)
     const polyBg = L.polyline(route.geometry, {
+      renderer: canvasRenderer,
       color: '#0284c7', // dark cyan/sky casing
       weight: 7,
       opacity: 0.5,
@@ -669,6 +676,7 @@ export const MapView: React.FC<Props> = ({
 
     // Foreground line (electric cyan / crisp sky)
     const polyFg = L.polyline(route.geometry, {
+      renderer: canvasRenderer,
       color: '#38bdf8', // crisp electric sky blue
       weight: 4.5,
       opacity: 0.95,
