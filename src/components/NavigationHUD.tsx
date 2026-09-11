@@ -60,7 +60,7 @@ export const NavigationHUD: React.FC<Props> = ({
       {/* Top Turn Maneuver Card */}
       <div
         id="nav-top-card"
-        className="fixed top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-40 text-white pointer-events-auto"
+        className="fixed top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-[1300] text-white pointer-events-auto"
         style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
       >
         <div className="rounded-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/15 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.85)] flex flex-col gap-2.5">
@@ -113,7 +113,7 @@ export const NavigationHUD: React.FC<Props> = ({
 
       {/* Floating Recenter & Controls Button */}
       <div
-        className="fixed right-4 bottom-32 z-40 flex flex-col gap-2 pointer-events-auto"
+        className="fixed right-4 bottom-32 z-[1300] flex flex-col gap-2 pointer-events-auto"
         style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 110px)' }}
       >
         <button
@@ -138,7 +138,7 @@ export const NavigationHUD: React.FC<Props> = ({
       {/* Bottom Navigation Dashboard HUD */}
       <div
         id="nav-bottom-hud"
-        className="fixed bottom-0 left-0 right-0 z-40 pointer-events-auto"
+        className="fixed bottom-0 left-0 right-0 z-[1300] pointer-events-auto"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}
       >
         <div className="mx-3 sm:mx-6 rounded-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/15 p-4 shadow-[0_-12px_48px_rgba(0,0,0,0.9)] flex items-center justify-between gap-3 text-white">

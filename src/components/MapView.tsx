@@ -14,28 +14,61 @@ interface Props {
   onMapReady?: (map: L.Map) => void;
 }
 
-const TILE_CONFIGS: Record<MapStyle, { url: string; options: L.TileLayerOptions }> = {
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    options: {
-      subdomains: 'abcd',
-      maxZoom: 20,
-      attribution: '&copy; CARTO &copy; OpenStreetMap',
-    },
-  },
+interface TileDefinition {
+  url: string;
+  options: L.TileLayerOptions;
+  referenceUrl?: string;
+  referenceOptions?: L.TileLayerOptions;
+}
+
+const cartoKey = typeof import.meta !== 'undefined' && import.meta.env?.VITE_CARTO_API_KEY;
+
+// 100% Free, zero watermark, no API key required default basemaps
+const TILE_DEFINITIONS: Record<MapStyle, TileDefinition> = {
+  // Obsidian Dark: Esri World Dark Gray Canvas (or CARTO if user provided key)
+  dark: cartoKey
+    ? {
+        url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${cartoKey}`,
+        options: {
+          subdomains: 'abcd',
+          maxZoom: 20,
+          attribution: '&copy; CARTO &copy; OpenStreetMap',
+        },
+      }
+    : {
+        url: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        options: {
+          maxZoom: 19,
+          attribution: '&copy; Esri, HERE, Garmin, OpenStreetMap contributors',
+        },
+        referenceUrl: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+        referenceOptions: {
+          maxZoom: 19,
+          pane: 'tilePane',
+          className: 'tile-reference',
+        },
+      },
+  // Pure Midnight: High-contrast OpenStreetMap inverted to OLED pitch-black
   midnight: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     options: {
-      subdomains: 'abcd',
-      maxZoom: 20,
-      attribution: '&copy; CARTO &copy; OpenStreetMap',
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      className: 'tile-midnight',
     },
   },
+  // Photorealistic Satellite with dark road & location labels
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     options: {
       maxZoom: 19,
       attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+    },
+    referenceUrl: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    referenceOptions: {
+      maxZoom: 19,
+      pane: 'tilePane',
+      className: 'tile-reference',
     },
   },
 };
@@ -52,11 +85,34 @@ export const MapView: React.FC<Props> = ({
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const baseLayerRef = useRef<L.TileLayer | null>(null);
+  const referenceLayerRef = useRef<L.TileLayer | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const destinationMarkerRef = useRef<L.Marker | null>(null);
   const routePolylineBgRef = useRef<L.Polyline | null>(null);
   const routePolylineFgRef = useRef<L.Polyline | null>(null);
+
+  // Helper to mount tile layers
+  const setTiles = (map: L.Map, style: MapStyle) => {
+    if (baseLayerRef.current) {
+      map.removeLayer(baseLayerRef.current);
+      baseLayerRef.current = null;
+    }
+    if (referenceLayerRef.current) {
+      map.removeLayer(referenceLayerRef.current);
+      referenceLayerRef.current = null;
+    }
+
+    const def = TILE_DEFINITIONS[style] || TILE_DEFINITIONS.dark;
+    const base = L.tileLayer(def.url, def.options).addTo(map);
+    base.bringToBack();
+    baseLayerRef.current = base;
+
+    if (def.referenceUrl) {
+      const ref = L.tileLayer(def.referenceUrl, def.referenceOptions).addTo(map);
+      referenceLayerRef.current = ref;
+    }
+  };
 
   // Initialize Map
   useEffect(() => {
@@ -74,10 +130,8 @@ export const MapView: React.FC<Props> = ({
       attributionControl: true,
     });
 
-    // Add Tile Layer
-    const tileConf = TILE_CONFIGS[mapStyle];
-    const tileLayer = L.tileLayer(tileConf.url, tileConf.options).addTo(map);
-    tileLayerRef.current = tileLayer;
+    // Add Tile Layers
+    setTiles(map, mapStyle);
 
     // Map click handler (drop pin)
     map.on('click', (e: L.LeafletMouseEvent) => {
@@ -97,15 +151,7 @@ export const MapView: React.FC<Props> = ({
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
-
-    if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
-    }
-
-    const tileConf = TILE_CONFIGS[mapStyle];
-    const newLayer = L.tileLayer(tileConf.url, tileConf.options).addTo(map);
-    newLayer.bringToBack();
-    tileLayerRef.current = newLayer;
+    setTiles(map, mapStyle);
   }, [mapStyle]);
 
   // Update User Marker
@@ -236,7 +282,7 @@ export const MapView: React.FC<Props> = ({
     <div
       ref={mapContainerRef}
       id="map-container"
-      className="w-full h-full absolute inset-0 bg-black cursor-crosshair"
+      className="w-full h-full absolute inset-0 bg-black cursor-crosshair z-0"
     />
   );
 };

@@ -21,12 +21,15 @@ body,
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
 }
 
-/* Map container full bleed */
+/* Map container full bleed & stacking isolation */
+#map-container,
 .leaflet-container {
   width: 100%;
   height: 100%;
   background: #000000 !important;
   outline: none;
+  z-index: 0 !important;
+  isolation: isolate;
 }
 
 /* Hide default leaflet controls since we have custom iOS-style controls */
@@ -43,6 +46,7 @@ body,
   border-radius: 6px !important;
   margin: 0 4px 4px 0 !important;
   backdrop-filter: blur(8px);
+  z-index: 500 !important;
 }
 
 .leaflet-control-attribution a {
@@ -55,9 +59,14 @@ body,
   transition: opacity 0.2s ease-in-out;
 }
 
-/* Midnight style tile filter */
+/* Midnight style tile filter: transforms into pure black OLED navigation map */
 .tile-midnight .leaflet-tile {
-  filter: brightness(0.85) contrast(1.15) hue-rotate(180deg) invert(1);
+  filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(125%) saturate(20%) !important;
+}
+
+/* Satellite road labels contrast boost */
+.tile-reference .leaflet-tile {
+  filter: contrast(1.2) brightness(1.1);
 }
 
 /* Custom scrollbars */

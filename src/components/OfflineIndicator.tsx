@@ -24,7 +24,7 @@ export const OfflineIndicator: React.FC = () => {
   return (
     <div
       id="offline-banner"
-      className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/90 text-black text-xs font-semibold backdrop-blur-md shadow-lg"
+      className="fixed top-4 left-1/2 -translate-x-1/2 z-[1400] flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/90 text-black text-xs font-semibold backdrop-blur-md shadow-lg"
     >
       <WifiOff className="w-3.5 h-3.5" />
       <span>Offline Mode — Cached tiles in use</span>

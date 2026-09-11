@@ -112,7 +112,7 @@ export const SearchBar: React.FC<Props> = ({
   return (
     <div
       ref={searchContainerRef}
-      className="absolute top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-30 flex flex-col gap-2 pointer-events-auto"
+      className="absolute top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-[1200] flex flex-col gap-2 pointer-events-auto"
       style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
     >
       {/* Search Header Bar */}

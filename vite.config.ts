@@ -11,7 +11,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
+        includeAssets: ['icon-192.png', 'icon-512.png'],
         manifest: {
           id: '/',
           name: 'Mapout',
@@ -48,12 +48,12 @@ export default defineConfig(() => {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
             {
-              urlPattern: /^https:\/\/.*\.basemaps\.cartocdn\.com\/.*/i,
+              urlPattern: /^https:\/\/.*(arcgisonline\.com|tile\.openstreetmap\.org|cartocdn\.com)\/.*/i,
               handler: 'CacheFirst',
               options: {
-                cacheName: 'carto-tiles-cache',
+                cacheName: 'mapout-tiles-cache-v2',
                 expiration: {
-                  maxEntries: 500,
+                  maxEntries: 1000,
                   maxAgeSeconds: 60 * 60 * 24 * 30,
                 },
                 cacheableResponse: {

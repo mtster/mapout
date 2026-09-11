@@ -9,6 +9,7 @@ interface Props {
 export const PWAInstallModal: React.FC<Props> = ({ className = '' }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSModal, setShowIOSModal] = useState(false);
+  const [iconLoaded, setIconLoaded] = useState(true);
 
   // If running in standalone mode (already installed), no need to show
   if (isInstalled) {
@@ -44,7 +45,7 @@ export const PWAInstallModal: React.FC<Props> = ({ className = '' }) => {
       {showIOSModal && (
         <div
           id="ios-install-backdrop"
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[1500] flex items-end sm:items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
           onClick={() => setShowIOSModal(false)}
         >
           <div
@@ -60,11 +61,18 @@ export const PWAInstallModal: React.FC<Props> = ({ className = '' }) => {
             </button>
 
             <div className="flex items-center gap-3.5 mb-4">
-              <img
-                src="/icon-192.png"
-                alt="Mapout"
-                className="w-12 h-12 rounded-2xl shadow-md border border-white/10"
-              />
+              {iconLoaded ? (
+                <img
+                  src="/icon-192.png"
+                  alt="Mapout"
+                  className="w-12 h-12 rounded-2xl shadow-md border border-white/10 object-cover"
+                  onError={() => setIconLoaded(false)}
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-white/15 flex items-center justify-center shadow-md">
+                  <Smartphone className="w-6 h-6 text-sky-400" />
+                </div>
+              )}
               <div>
                 <h3 className="text-base font-semibold tracking-tight text-white">Add Mapout to Home Screen</h3>
                 <p className="text-xs text-zinc-400">Run full-screen without Safari browser bars</p>

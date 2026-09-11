@@ -68,7 +68,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
   return (
     <div
       id="route-bottom-sheet"
-      className="fixed bottom-0 left-0 right-0 sm:left-6 sm:bottom-6 sm:max-w-md sm:rounded-3xl rounded-t-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.8)] z-30 text-white overflow-hidden transition-all duration-300 pointer-events-auto"
+      className="fixed bottom-0 left-0 right-0 sm:left-6 sm:bottom-6 sm:max-w-md sm:rounded-3xl rounded-t-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.8)] z-[1200] text-white overflow-hidden transition-all duration-300 pointer-events-auto"
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}
     >
       {/* Drag handle */}

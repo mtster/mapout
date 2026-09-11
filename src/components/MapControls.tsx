@@ -39,7 +39,7 @@ export const MapControls: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed right-3 sm:right-6 bottom-20 z-30 flex flex-col gap-2.5 pointer-events-auto"
+      className="fixed right-3 sm:right-6 bottom-20 z-[1200] flex flex-col gap-2.5 pointer-events-auto"
       style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 20px)' }}
     >
       {/* Compass / Reset North */}
@@ -67,7 +67,7 @@ export const MapControls: React.FC<Props> = ({
 
         {showLayerMenu && (
           <div
-            className="absolute right-14 bottom-0 w-36 rounded-2xl bg-zinc-950/95 border border-white/15 p-1.5 backdrop-blur-3xl shadow-2xl space-y-1 z-40"
+            className="absolute right-14 bottom-0 w-36 rounded-2xl bg-zinc-950/95 border border-white/15 p-1.5 backdrop-blur-3xl shadow-2xl space-y-1 z-[1250]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-2.5 py-1 text-[10px] font-bold tracking-wider text-zinc-500 uppercase">
