@@ -20,9 +20,24 @@ export default function App() {
   const [selectedDestination, setSelectedDestination] = useState<PlaceResult | null>(null);
   const [route, setRoute] = useState<RouteData | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
-  const [travelMode, setTravelMode] = useState<TravelMode>('driving');
 
-  // Turn-by-Turn Navigation state
+  // Persistent Travel Mode (Drive / Cycle / Walk)
+  const [travelMode, setTravelMode] = useState<TravelMode>(() => {
+    try {
+      const saved = localStorage.getItem('mapout_travel_mode') as TravelMode;
+      if (saved === 'driving' || saved === 'cycling' || saved === 'walking') {
+        return saved;
+      }
+    } catch {
+      // Ignored
+    }
+    return 'driving';
+  });
+
+  // Bottom sheet collapse/peek state
+  const [isRouteSheetCollapsed, setIsRouteSheetCollapsed] = useState(false);
+
+  // Turn-by-Turn Navigation state: Audio guidance defaults to MUTED on start
   const [isNavigating, setIsNavigating] = useState(false);
   const [isSimulated, setIsSimulated] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -30,7 +45,7 @@ export default function App() {
   const [remainingDuration, setRemainingDuration] = useState(0);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [activeNavLocation, setActiveNavLocation] = useState<LatLng | null>(null);
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [locationErrorMsg, setLocationErrorMsg] = useState<string | null>(null);
 
   // References for live GPS & Simulation
@@ -118,10 +133,13 @@ export default function App() {
     );
   }, [userLocation, mapInstance]);
 
-  // Continuously track real GPS user position
+  // Attempt silent GPS fix on startup
   useEffect(() => {
-    requestLocation(true);
+    requestLocation(false);
+  }, [requestLocation]);
 
+  // Continuously update user location in background
+  useEffect(() => {
     if (!navigator.geolocation) return;
 
     const globalWatchId = navigator.geolocation.watchPosition(
@@ -134,7 +152,6 @@ export default function App() {
           accuracy: pos.coords.accuracy,
         };
         setUserLocation(coords);
-        setIsLocating(false);
 
         if (!hasCenteredOnUserRef.current && mapInstance) {
           mapInstance.flyTo([coords.lat, coords.lng], 16, { duration: 1.2 });
@@ -179,7 +196,7 @@ export default function App() {
           };
           setUserLocation(realCoords);
           startPoint = [realCoords.lat, realCoords.lng];
-        } catch (e) {
+        } catch {
           console.warn('Real GPS not yet available, falling back to map center');
         }
       }
@@ -213,15 +230,16 @@ export default function App() {
   // 3. User selects a place from Search
   const handleSelectPlace = (place: PlaceResult) => {
     setSelectedDestination(place);
+    setIsRouteSheetCollapsed(false);
     if (mapInstance) {
       mapInstance.flyTo([place.lat, place.lng], 15, { duration: 1.2 });
     }
     fetchRoute([place.lat, place.lng], place.name, travelMode);
   };
 
-  // 4. User drops a pin by clicking on the map
+  // 4. User drops a pin by clicking on the map (only when no destination is currently active)
   const handleMapClick = async (coords: LatLng) => {
-    if (isNavigating) return; // Don't interrupt active navigation
+    if (isNavigating) return;
 
     // Reverse geocode clicked location
     const placeName = await reverseGeocode(coords[0], coords[1]);
@@ -234,26 +252,41 @@ export default function App() {
     };
 
     setSelectedDestination(place);
+    setIsRouteSheetCollapsed(false);
     fetchRoute(coords, placeName, travelMode);
   };
 
-  // 5. Travel mode changed
+  // 5. User taps the map while a destination pin is already active:
+  // Disables pin changes and instead collapses the sheet so user can view the full route!
+  const handleMapTapWithDestination = () => {
+    if (!isNavigating) {
+      setIsRouteSheetCollapsed(true);
+    }
+  };
+
+  // 6. Travel mode changed
   const handleChangeMode = (mode: TravelMode) => {
     setTravelMode(mode);
+    try {
+      localStorage.setItem('mapout_travel_mode', mode);
+    } catch {
+      // Ignored
+    }
     if (selectedDestination) {
       fetchRoute([selectedDestination.lat, selectedDestination.lng], selectedDestination.name, mode);
     }
   };
 
-  // 6. Clear destination
+  // 7. Clear destination
   const handleClearDestination = () => {
     setSelectedDestination(null);
     setRoute(null);
     setIsNavigating(false);
+    setIsRouteSheetCollapsed(false);
     stopNavigation();
   };
 
-  // 7. Start Navigation (Real GPS or Simulated)
+  // 8. Start Navigation (Real GPS or Simulated)
   const handleStartNavigation = (simulated: boolean) => {
     if (!route || !route.geometry || route.geometry.length === 0) return;
 
@@ -263,18 +296,13 @@ export default function App() {
     setRemainingDistance(route.distance);
     setRemainingDuration(route.duration);
 
-    // Initial voice announcement
-    const firstStep = route.steps[0];
-    const initialAnnouncement = firstStep
-      ? `Starting route to ${route.destinationName}. ${firstStep.instruction}.`
-      : `Starting navigation to ${route.destinationName}.`;
-    voiceGuidance.speak(initialAnnouncement, true);
+    // Audio guidance must always default to muted when navigation is started
+    setIsVoiceEnabled(false);
+    voiceGuidance.setEnabled(false);
 
     if (simulated) {
-      // Run route simulation along the coordinates
       startSimulation(route);
     } else {
-      // Start live GPS tracking
       startGPSTracking();
     }
   };
@@ -305,7 +333,6 @@ export default function App() {
     const coords = activeRoute.geometry;
     const totalPoints = coords.length;
 
-    // Simulation speed factor based on mode
     const speedKmh = travelMode === 'walking' ? 5 : travelMode === 'cycling' ? 18 : 45;
     setCurrentSpeed(speedKmh);
 
@@ -314,11 +341,9 @@ export default function App() {
       const currIdx = simIndexRef.current;
 
       if (currIdx >= totalPoints) {
-        // Arrived at destination
         setActiveNavLocation(coords[totalPoints - 1]);
         setRemainingDistance(0);
         setRemainingDuration(0);
-        voiceGuidance.speak(`You have arrived at your destination, ${activeRoute.destinationName}.`, true);
         if (simulationTimerRef.current) clearInterval(simulationTimerRef.current);
         return;
       }
@@ -326,14 +351,12 @@ export default function App() {
       const currentPos = coords[currIdx];
       setActiveNavLocation(currentPos);
 
-      // Estimate remaining progress
       const progressFraction = currIdx / totalPoints;
       const remDist = Math.max(0, Math.round(activeRoute.distance * (1 - progressFraction)));
       const remDur = Math.max(0, Math.round(activeRoute.duration * (1 - progressFraction)));
       setRemainingDistance(remDist);
       setRemainingDuration(remDur);
 
-      // Check distance to next step maneuvers
       activeRoute.steps.forEach((step, sIdx) => {
         const distToManeuver = calculateHaversineDistance(currentPos, step.location);
         if (distToManeuver < 35 && sIdx > currentStepIndex) {
@@ -364,36 +387,47 @@ export default function App() {
           accuracy: pos.coords.accuracy,
         });
 
+        if (mapInstance) {
+          mapInstance.panTo(coords, { animate: true, duration: 0.8 });
+        }
+
         if (route) {
-          // Check progress against steps
-          route.steps.forEach((step, sIdx) => {
+          const destCoords = route.geometry[route.geometry.length - 1];
+          const distToDest = calculateHaversineDistance(coords, destCoords);
+          setRemainingDistance(Math.round(distToDest));
+
+          route.steps.forEach((step, idx) => {
             const dist = calculateHaversineDistance(coords, step.location);
-            if (dist < 30 && sIdx > currentStepIndex) {
-              setCurrentStepIndex(sIdx);
+            if (dist < 40 && idx > currentStepIndex) {
+              setCurrentStepIndex(idx);
               voiceGuidance.speak(step.instruction);
             }
           });
+
+          if (distToDest < 30) {
+            voiceGuidance.speak(`You have arrived at ${route.destinationName}`, true);
+            stopNavigation();
+          }
         }
       },
       (err) => {
-        console.warn('GPS watch error:', err);
+        console.warn('Navigation GPS watch error:', err.message);
       },
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 1000 }
     );
   };
 
-  // Voice toggle
+  // Toggle voice mute
   const handleToggleVoice = () => {
-    const nextVal = !isVoiceEnabled;
-    setIsVoiceEnabled(nextVal);
-    voiceGuidance.setEnabled(nextVal);
+    const next = !isVoiceEnabled;
+    setIsVoiceEnabled(next);
+    voiceGuidance.setEnabled(next);
   };
 
-  // Recenter map during navigation or idle
+  // Recenter during navigation
   const handleRecenter = () => {
-    if (!mapInstance) return;
     const target = activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] as LatLng : null);
-    if (target) {
+    if (target && mapInstance) {
       mapInstance.flyTo(target, 17, { duration: 0.8 });
     }
   };
@@ -410,11 +444,11 @@ export default function App() {
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-black text-white select-none">
+    <main className="fixed inset-0 w-full h-full h-[100dvh] overflow-hidden bg-black text-white select-none">
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
-      {/* Main Map Canvas */}
+      {/* Main Map Canvas: Covers entire full-screen with zero black margin */}
       <MapView
         userLocation={userLocation}
         destination={selectedDestination}
@@ -422,7 +456,9 @@ export default function App() {
         mapStyle={mapStyle}
         isNavigating={isNavigating}
         activeNavLocation={activeNavLocation}
+        hasDestination={!!selectedDestination}
         onMapClick={handleMapClick}
+        onMapTapWithDestination={handleMapTapWithDestination}
         onMapReady={setMapInstance}
       />
 
@@ -464,7 +500,7 @@ export default function App() {
         isNavigating={isNavigating}
       />
 
-      {/* Route Bottom Sheet (Destination preview & mode calculation) */}
+      {/* Native Route Bottom Sheet (Peek and Expanded states, Drag gestures, Zero-twitch mode switching) */}
       <RouteBottomSheet
         route={route}
         isLoadingRoute={isLoadingRoute}
@@ -473,6 +509,8 @@ export default function App() {
         onStartNavigation={handleStartNavigation}
         onClose={handleClearDestination}
         isNavigating={isNavigating}
+        isCollapsed={isRouteSheetCollapsed}
+        onToggleCollapse={(collapsed) => setIsRouteSheetCollapsed(typeof collapsed === 'boolean' ? collapsed : !isRouteSheetCollapsed)}
       />
 
       {/* Active Turn-by-Turn Navigation HUD */}

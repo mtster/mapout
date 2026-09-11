@@ -132,17 +132,22 @@ export async function calculateRoute(
   mode: TravelMode = 'driving',
   destinationName = 'Destination'
 ): Promise<RouteData | null> {
-  // Public OSRM routing server
-  // OSRM expects: /route/v1/{profile}/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson&steps=true
-  const profile = mode === 'cycling' ? 'cycling' : mode === 'walking' ? 'walking' : 'driving';
-  const url = `https://router.project-osrm.org/route/v1/${profile}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+  // Use OpenStreetMap dedicated routing profiles for authentic vehicle routing
+  // routed-car for driving, routed-bike for cycling paths, routed-foot for pedestrian paths
+  const osmProfile = mode === 'cycling' ? 'routed-bike' : mode === 'walking' ? 'routed-foot' : 'routed-car';
+  const primaryUrl = `https://routing.openstreetmap.de/${osmProfile}/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+  const fallbackUrl = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
 
   try {
-    let res = await fetch(url);
-    if (!res.ok && profile !== 'driving') {
-      // Fallback to driving profile if cycling/walking profile is unavailable on public server
-      const fallbackUrl = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+    let res: Response;
+    let isFallback = false;
+    try {
+      res = await fetch(primaryUrl);
+      if (!res.ok) throw new Error('Primary routing error');
+    } catch {
+      // Fallback to project-osrm driving endpoint
       res = await fetch(fallbackUrl);
+      isFallback = true;
     }
 
     if (!res.ok) {
@@ -162,13 +167,15 @@ export async function calculateRoute(
     let duration = route.duration; // seconds
     const distance = route.distance; // meters
 
-    // Adjust duration if fell back to driving profile
-    if (mode === 'walking') {
-      // average walking speed ~ 4.8 km/h = 1.33 m/s
-      duration = Math.round(distance / 1.33);
-    } else if (mode === 'cycling') {
-      // average cycling speed ~ 16 km/h = 4.44 m/s
-      duration = Math.round(distance / 4.44);
+    // Adjust duration ONLY if fell back to generic driving server
+    if (isFallback) {
+      if (mode === 'walking') {
+        // average walking speed ~ 4.8 km/h = 1.33 m/s
+        duration = Math.round(distance / 1.33);
+      } else if (mode === 'cycling') {
+        // average cycling speed ~ 16 km/h = 4.44 m/s
+        duration = Math.round(distance / 4.44);
+      }
     }
 
     // Parse turn-by-turn steps

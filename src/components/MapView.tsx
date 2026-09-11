@@ -10,7 +10,9 @@ interface Props {
   mapStyle: MapStyle;
   isNavigating: boolean;
   activeNavLocation: LatLng | null;
+  hasDestination: boolean;
   onMapClick: (coords: LatLng) => void;
+  onMapTapWithDestination?: () => void;
   onMapReady?: (map: L.Map) => void;
 }
 
@@ -86,7 +88,9 @@ export const MapView: React.FC<Props> = ({
   mapStyle,
   isNavigating,
   activeNavLocation,
+  hasDestination,
   onMapClick,
+  onMapTapWithDestination,
   onMapReady,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -111,10 +115,20 @@ export const MapView: React.FC<Props> = ({
     }
   }, [isNavigating]);
 
+  const hasDestinationRef = useRef(hasDestination);
+  useEffect(() => {
+    hasDestinationRef.current = hasDestination;
+  }, [hasDestination]);
+
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => {
     onMapClickRef.current = onMapClick;
   }, [onMapClick]);
+
+  const onMapTapWithDestinationRef = useRef(onMapTapWithDestination);
+  useEffect(() => {
+    onMapTapWithDestinationRef.current = onMapTapWithDestination;
+  }, [onMapTapWithDestination]);
 
   // Helper to mount tile layers
   const setTiles = (map: L.Map, style: MapStyle) => {
@@ -162,18 +176,32 @@ export const MapView: React.FC<Props> = ({
     // Add Tile Layers
     setTiles(map, mapStyle);
 
+    // Initial full size invalidation to ensure whole-screen coverage
+    setTimeout(() => {
+      map.invalidateSize({ pan: false });
+    }, 50);
+    setTimeout(() => {
+      map.invalidateSize({ pan: false });
+    }, 300);
+
     // ----------------------------------------------------
     // Google Maps One-Finger / Double-Click & Drag to Zoom
+    // Uses Leaflet's EXACT pinch-zoom pipeline (_move with pinch: true)
+    // to prevent tile thrashing and eliminate black screen flash.
     // ----------------------------------------------------
     let lastTapTime = 0;
     let lastTapX = 0;
     let lastTapY = 0;
     let isSecondTapHeld = false;
     let isDoubleTapDragging = false;
+    let moved = false;
     let dragStartY = 0;
-    let gestureStartZoom = 14;
-    let currentTargetZoom = 14;
-    let anchorLatLng: L.LatLng | null = null;
+    let startZoom = 14;
+    let targetZoom = 14;
+    let pinchStartLatLng: L.LatLng | null = null;
+    let centerPoint: L.Point | null = null;
+    let targetCenter: L.LatLng | null = null;
+    let touchPoint: L.Point | null = null;
     let suppressClickUntil = 0;
     let pendingClickTimer: ReturnType<typeof setTimeout> | null = null;
     let rafId: number | null = null;
@@ -182,11 +210,12 @@ export const MapView: React.FC<Props> = ({
       e.preventDefault();
     };
 
-    const updateZoomFrame = () => {
+    const updatePinchZoomFrame = () => {
       rafId = null;
-      if (!isDoubleTapDragging || !anchorLatLng) return;
-      // Zoom anchored at the tap position smoothly
-      map.setZoomAround(anchorLatLng, currentTargetZoom, { animate: false });
+      if (!isDoubleTapDragging || !targetCenter) return;
+      // Use Leaflet's native pinch move which applies smooth GPU matrix transforms
+      // without discarding or re-querying tiles
+      (map as any)._move(targetCenter, targetZoom, { pinch: true, round: false }, undefined);
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -200,31 +229,40 @@ export const MapView: React.FC<Props> = ({
 
       if (timeDiff < 380 && distX < 40 && distY < 40) {
         // Second tap detected within double-tap window!
-        // Prevent browser text magnifying glass and context selection
         e.preventDefault();
 
         if (pendingClickTimer) {
           clearTimeout(pendingClickTimer);
           pendingClickTimer = null;
         }
+
+        // Halt any in-flight animations
+        (map as any)._stop();
+
         isSecondTapHeld = true;
         isDoubleTapDragging = false;
+        moved = false;
         dragStartY = e.clientY;
-        gestureStartZoom = map.getZoom();
-        currentTargetZoom = gestureStartZoom;
-        anchorLatLng = map.containerPointToLatLng([e.clientX, e.clientY]);
+        startZoom = map.getZoom();
+        targetZoom = startZoom;
+
+        // Anchor calculations identical to Leaflet TouchZoom
+        centerPoint = map.getSize().divideBy(2);
+        touchPoint = map.mouseEventToContainerPoint(e as any);
+        pinchStartLatLng = map.containerPointToLatLng(touchPoint);
+        targetCenter = map.getCenter();
       } else {
         isSecondTapHeld = false;
         isDoubleTapDragging = false;
+        moved = false;
         lastTapX = e.clientX;
         lastTapY = e.clientY;
       }
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!isSecondTapHeld) return;
+      if (!isSecondTapHeld || !touchPoint || !centerPoint || !pinchStartLatLng) return;
 
-      // Prevent native OS text selection & magnifier
       e.preventDefault();
 
       const dy = e.clientY - dragStartY;
@@ -234,19 +272,31 @@ export const MapView: React.FC<Props> = ({
         if (Math.abs(dy) > 6) {
           isDoubleTapDragging = true;
           map.dragging.disable();
+          (map as any)._moveStart(true, false);
+          moved = true;
         }
       }
 
       if (isDoubleTapDragging) {
         // Drag down (dy > 0) -> Zoom in
         // Drag up (dy < 0) -> Zoom out
-        // Smooth sensitivity: ~1 zoom level per 160 pixels of vertical drag
-        const deltaZoom = dy / 160;
-        currentTargetZoom = Math.min(20, Math.max(2, gestureStartZoom + deltaZoom));
+        // Use identical scale exponential formula as two-finger pinch:
+        // 160px vertical drag = factor of 2.0 (1 full zoom level)
+        const scale = Math.pow(2, dy / 160);
+        targetZoom = (map as any).getScaleZoom(scale, startZoom);
 
-        // Use requestAnimationFrame to batch DOM updates & prevent tile thrashing/blackouts
+        // Clamp between min and max zoom
+        targetZoom = Math.min(20, Math.max(2, targetZoom));
+
+        // Center calculation matching Leaflet TouchZoom: keeps the touched point stationary under finger
+        const delta = touchPoint.subtract(centerPoint);
+        targetCenter = map.unproject(
+          map.project(pinchStartLatLng, targetZoom).subtract(delta),
+          targetZoom
+        );
+
         if (rafId === null) {
-          rafId = requestAnimationFrame(updateZoomFrame);
+          rafId = requestAnimationFrame(updatePinchZoomFrame);
         }
       }
     };
@@ -260,11 +310,20 @@ export const MapView: React.FC<Props> = ({
       if (isDoubleTapDragging) {
         e.preventDefault();
         map.dragging.enable();
-        if (anchorLatLng) {
-          map.setZoomAround(anchorLatLng, currentTargetZoom, { animate: false });
+
+        if (moved && targetCenter) {
+          const limitZoom = (map as any)._limitZoom(targetZoom);
+          if ((map as any).options.zoomAnimation) {
+            (map as any)._animateZoom(targetCenter, limitZoom, true, (map as any).options.zoomSnap);
+          } else {
+            (map as any)._resetView(targetCenter, limitZoom);
+          }
+          (map as any)._moveEnd(true);
         }
+
         isDoubleTapDragging = false;
         isSecondTapHeld = false;
+        moved = false;
         suppressClickUntil = Date.now() + 400;
         lastTapTime = 0;
         return;
@@ -273,8 +332,8 @@ export const MapView: React.FC<Props> = ({
       if (isSecondTapHeld) {
         e.preventDefault();
         // Quick double tap without drag: smoothly zoom in 1 step around tap location
-        if (anchorLatLng) {
-          map.setZoomAround(anchorLatLng, Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
+        if (pinchStartLatLng) {
+          map.setZoomAround(pinchStartLatLng, Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
         } else {
           map.setZoom(Math.min(20, Math.round(map.getZoom() + 1)), { animate: true });
         }
@@ -300,6 +359,7 @@ export const MapView: React.FC<Props> = ({
       }
       isSecondTapHeld = false;
       isDoubleTapDragging = false;
+      moved = false;
     };
 
     // Kill text selection and long-press callout on the map container
@@ -316,8 +376,6 @@ export const MapView: React.FC<Props> = ({
       if (isNavigatingRef.current) return;
       if (Date.now() < suppressClickUntil) return;
 
-      const clickedCoords: LatLng = [e.latlng.lat, e.latlng.lng];
-
       if (pendingClickTimer) {
         clearTimeout(pendingClickTimer);
       }
@@ -325,11 +383,30 @@ export const MapView: React.FC<Props> = ({
       // 220ms grace window: if second tap begins, timer is cancelled
       pendingClickTimer = setTimeout(() => {
         if (!isNavigatingRef.current && Date.now() >= suppressClickUntil) {
-          onMapClickRef.current(clickedCoords);
+          // If a pin is currently active, clicking the map MUST NOT drop a new pin;
+          // instead it pulls down the popup sheet to the peek state
+          if (hasDestinationRef.current) {
+            onMapTapWithDestinationRef.current?.();
+          } else {
+            const clickedCoords: LatLng = [e.latlng.lat, e.latlng.lng];
+            onMapClickRef.current(clickedCoords);
+          }
         }
         pendingClickTimer = null;
       }, 220);
     });
+
+    // ResizeObserver ensures the map continuously and dynamically fills the entire screen
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize({ pan: false });
+    });
+    resizeObserver.observe(container);
+
+    const handleWindowResize = () => {
+      map.invalidateSize({ pan: false });
+    };
+    window.addEventListener('resize', handleWindowResize);
+    window.addEventListener('orientationchange', handleWindowResize);
 
     mapInstanceRef.current = map;
     if (onMapReady) onMapReady(map);
@@ -337,6 +414,9 @@ export const MapView: React.FC<Props> = ({
     return () => {
       if (pendingClickTimer) clearTimeout(pendingClickTimer);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+      window.removeEventListener('orientationchange', handleWindowResize);
       container.removeEventListener('selectstart', preventSelection);
       container.removeEventListener('contextmenu', preventSelection);
       container.removeEventListener('pointerdown', onPointerDown);
@@ -490,6 +570,7 @@ export const MapView: React.FC<Props> = ({
       ref={mapContainerRef}
       id="map-container"
       className="w-full h-full absolute inset-0 bg-black cursor-crosshair z-0"
+      style={{ width: '100%', height: '100%' }}
     />
   );
 };
