@@ -1,0 +1,10 @@
+{
+  "name": "Mapout",
+  "description": "A minimalist, dark-themed, ultra-lightweight PWA map and navigation app with route calculation, live turn-by-turn guidance, and destination search.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
