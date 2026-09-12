@@ -116,7 +116,7 @@ export const NavigationHUD: React.FC<Props> = ({
       {/* Floating Re-center & Controls Buttons */}
       <div
         className="fixed right-4 z-[1300] flex flex-col items-end gap-2 pointer-events-auto"
-        style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 12px) + 82px)' }}
+        style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 84px)' }}
       >
         {/* Re-center Button - ONLY shown when user manually drags or zooms the map away from navigation position */}
         {showRecenter && (
@@ -149,7 +149,7 @@ export const NavigationHUD: React.FC<Props> = ({
         id="nav-bottom-hud"
         className="fixed bottom-0 left-0 right-0 z-[1300] pointer-events-auto bg-zinc-950/95 backdrop-blur-3xl border-t border-white/15 shadow-[0_-12px_48px_rgba(0,0,0,0.95)] sm:left-6 sm:right-auto sm:w-[450px] sm:bottom-4 sm:rounded-3xl sm:border"
         style={{
-          paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)',
+          paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)',
           paddingTop: '12px',
           paddingLeft: '16px',
           paddingRight: '16px',

@@ -9,6 +9,7 @@ import { MapControls } from './components/MapControls';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { calculateRoute, reverseGeocode, calculateHaversineDistance, calculateBearing } from './services/mapService';
 import { voiceGuidance } from './utils/voiceGuidance';
+import { useWakeLock } from './hooks/useWakeLock';
 
 export default function App() {
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
@@ -41,6 +42,9 @@ export default function App() {
   const [isNavigating, setIsNavigating] = useState(false);
   const [isSimulated, setIsSimulated] = useState(false);
   const [isFollowingUser, setIsFollowingUser] = useState(true);
+
+  // Screen Wake Lock: Keeps screen awake during active navigation
+  useWakeLock(isNavigating);
   const [currentNavHeading, setCurrentNavHeading] = useState<number | null>(null);
   const [bearing, setBearing] = useState(0);
   const [recenterTrigger, setRecenterTrigger] = useState(0);

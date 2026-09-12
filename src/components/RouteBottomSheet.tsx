@@ -137,7 +137,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
       style={{
         bottom: 0,
         transform: `translate3d(0, ${dragOffset}px, 0)`,
-        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)',
       }}
     >
       {/* Interactive Drag Handle Header */}
