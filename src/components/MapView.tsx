@@ -205,8 +205,10 @@ export const MapView: React.FC<Props> = ({
     mapInstanceRef.current = map;
 
     map.on('load', () => {
-      // Force MapLibre to calculate real container dimensions immediately
+      // Force MapLibre to calculate real container dimensions immediately across mobile frames
       map.resize();
+      setTimeout(() => map.resize(), 100);
+      setTimeout(() => map.resize(), 500);
       onMapReady?.(map);
       updateRouteLayer(map, routeRef.current);
     });
@@ -267,15 +269,28 @@ export const MapView: React.FC<Props> = ({
     });
 
     // Observe parent container resize and update MapLibre canvas on mobile viewport shifts
-    const resizeObserver = new ResizeObserver(() => {
+    const handleResize = () => {
       map.resize();
-    });
+    };
+
+    const resizeObserver = new ResizeObserver(handleResize);
     if (mapContainerRef.current) {
       resizeObserver.observe(mapContainerRef.current);
     }
 
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
+    }
+
     return () => {
       resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+      }
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -471,8 +486,16 @@ export const MapView: React.FC<Props> = ({
     <div
       ref={mapContainerRef}
       id="map-container"
-      className="absolute inset-0 bg-black cursor-crosshair z-0"
-      style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+      className="fixed inset-0 bg-black cursor-crosshair z-0 w-full h-full"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh',
+      }}
     />
   );
 };
