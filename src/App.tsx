@@ -66,10 +66,13 @@ export default function App() {
   const [activeNavLocation, setActiveNavLocation] = useState<LatLng | null>(null);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [locationErrorMsg, setLocationErrorMsg] = useState<string | null>(null);
+  const [isCenteredOnUser, setIsCenteredOnUser] = useState(true);
 
   // Mutable refs to prevent stale closures in watch callbacks & timers
   const routeRef = useRef<RouteData | null>(null);
   routeRef.current = route;
+
+  const routeRequestIdRef = useRef(0);
 
   const currentStepIndexRef = useRef(0);
   currentStepIndexRef.current = currentStepIndex;
@@ -112,6 +115,7 @@ export default function App() {
         if ((forceCenter || !hasCenteredOnUserRef.current) && mapInstance) {
           mapInstance.flyTo({ center: [coords.lng, coords.lat], zoom: 16, duration: 1200 });
           hasCenteredOnUserRef.current = true;
+          setIsCenteredOnUser(true);
         }
       },
       (err) => {
@@ -124,8 +128,9 @@ export default function App() {
 
   // Explicit user tap on Locate Me button
   const handleLocateClick = useCallback(() => {
+    setIsCenteredOnUser(true);
     if (userLocation && mapInstance) {
-      mapInstance.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 16, duration: 1000 });
+      mapInstance.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 16, duration: 800 });
     }
 
     if (!navigator.geolocation) {
@@ -149,8 +154,9 @@ export default function App() {
         setLocationErrorMsg(null);
 
         if (mapInstance) {
-          mapInstance.flyTo({ center: [coords.lng, coords.lat], zoom: 16, duration: 1000 });
+          mapInstance.flyTo({ center: [coords.lng, coords.lat], zoom: 16, duration: 800 });
           hasCenteredOnUserRef.current = true;
+          setIsCenteredOnUser(true);
         }
       },
       (err) => {
@@ -189,6 +195,7 @@ export default function App() {
         if (!hasCenteredOnUserRef.current && mapInstance) {
           mapInstance.flyTo({ center: [coords.lng, coords.lat], zoom: 16, duration: 1200 });
           hasCenteredOnUserRef.current = true;
+          setIsCenteredOnUser(true);
         }
       },
       (err) => {
@@ -205,6 +212,7 @@ export default function App() {
   // 2. Route calculation when destination or travel mode changes
   const fetchRoute = useCallback(
     async (destCoords: LatLng, destName: string, mode: TravelMode) => {
+      const currentRequestId = ++routeRequestIdRef.current;
       setIsLoadingRoute(true);
 
       let startPoint: LatLng | null = userLocation ? [userLocation.lat, userLocation.lng] : null;
@@ -243,6 +251,7 @@ export default function App() {
 
       try {
         const calculated = await calculateRoute(startPoint, destCoords, mode, destName);
+        if (currentRequestId !== routeRequestIdRef.current) return;
         setRoute(calculated);
         if (calculated) {
           setRemainingDistance(calculated.distance);
@@ -251,9 +260,13 @@ export default function App() {
           setTargetArrivalTimestamp(Date.now() + calculated.duration * 1000);
         }
       } catch (err) {
-        console.error('Route calculation error:', err);
+        if (currentRequestId === routeRequestIdRef.current) {
+          console.error('Route calculation error:', err);
+        }
       } finally {
-        setIsLoadingRoute(false);
+        if (currentRequestId === routeRequestIdRef.current) {
+          setIsLoadingRoute(false);
+        }
       }
     },
     [userLocation, mapInstance]
@@ -316,6 +329,7 @@ export default function App() {
 
   // 7. Clear destination
   const handleClearDestination = () => {
+    routeRequestIdRef.current++;
     setSelectedDestination(null);
     setRoute(null);
     setIsNavigating(false);
@@ -387,6 +401,25 @@ export default function App() {
     if (watchIdRef.current !== null && navigator.geolocation) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
+    }
+
+    if (mapInstance) {
+      if (userLocation) {
+        mapInstance.easeTo({
+          center: [userLocation.lng, userLocation.lat],
+          zoom: 16,
+          pitch: 0,
+          bearing: 0,
+          duration: 600,
+        });
+        setIsCenteredOnUser(true);
+      } else {
+        mapInstance.easeTo({
+          pitch: 0,
+          bearing: 0,
+          duration: 400,
+        });
+      }
     }
   };
 
@@ -576,8 +609,9 @@ export default function App() {
     voiceGuidance.setEnabled(next);
   };
 
-  // User manually panned or zoomed the map away during navigation
+  // User manually panned or zoomed the map away
   const handleUserPanOrZoom = useCallback(() => {
+    setIsCenteredOnUser(false);
     if (isNavigating) {
       setIsFollowingUser(false);
     }
@@ -670,6 +704,7 @@ export default function App() {
         onLocateMe={handleLocateClick}
         isLocating={isLocating}
         hasUserLocation={!!userLocation}
+        isCenteredOnUser={isCenteredOnUser}
         onZoomIn={() => mapInstance?.zoomIn()}
         onZoomOut={() => mapInstance?.zoomOut()}
         onResetNorth={handleResetNorth}

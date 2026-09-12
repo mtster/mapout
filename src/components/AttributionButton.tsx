@@ -9,52 +9,60 @@ export const AttributionButton: React.FC<Props> = ({ isNavigating }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
-
   // Hide during active turn-by-turn navigation so HUD has complete focus
   if (isNavigating) return null;
 
   return (
-    <div
-      ref={containerRef}
-      className="fixed left-3 sm:left-6 z-[1150] pointer-events-auto transition-all duration-300"
-      style={{
-        top: 'calc(env(safe-area-inset-top, 0px) + 70px)',
-      }}
-    >
-      {/* Attribution Button - Identical in design to bottom-right map controls */}
-      <button
-        id="openfreemap-attribution-btn"
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-11 h-11 rounded-2xl border backdrop-blur-2xl shadow-xl flex items-center justify-center transition active:scale-90 ${
-          isOpen
-            ? 'bg-sky-500/20 border-sky-400 text-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.25)]'
-            : 'bg-zinc-950/85 border-white/10 text-zinc-300 hover:text-white hover:bg-zinc-900'
-        }`}
-        title="Map Attribution & Data Sources"
-        aria-label="Map Attribution and Info"
-      >
-        <Info className="w-5 h-5" />
-      </button>
-
-      {/* Attribution Card / Popover */}
+    <>
+      {/* Fullscreen backdrop to dismiss popover when tapping anywhere without triggering map clicks */}
       {isOpen && (
         <div
-          id="attribution-popover"
-          className="absolute left-0 top-13 w-72 sm:w-80 rounded-2xl bg-zinc-950/95 border border-white/15 p-4 backdrop-blur-3xl shadow-2xl space-y-3 z-[1250] text-left animate-in fade-in zoom-in-95 duration-150"
+          id="attribution-backdrop"
+          className="fixed inset-0 z-[1200] bg-transparent cursor-default"
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setIsOpen(false);
+          }}
+          onTouchStart={(e) => {
+            e.stopPropagation();
+            setIsOpen(false);
+          }}
+        />
+      )}
+
+      <div
+        ref={containerRef}
+        className="fixed left-3 sm:left-6 z-[1250] pointer-events-auto transition-all duration-300"
+        style={{
+          top: 'calc(env(safe-area-inset-top, 0px) + 70px)',
+        }}
+      >
+        {/* Attribution Button - Identical in design to bottom-right map controls */}
+        <button
+          id="openfreemap-attribution-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(!isOpen);
+          }}
+          className={`w-11 h-11 rounded-2xl border backdrop-blur-2xl shadow-xl flex items-center justify-center transition active:scale-90 ${
+            isOpen
+              ? 'bg-sky-500/20 border-sky-400 text-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.25)]'
+              : 'bg-zinc-950/85 border-white/10 text-zinc-300 hover:text-white hover:bg-zinc-900'
+          }`}
+          title="Map Attribution & Data Sources"
+          aria-label="Map Attribution and Info"
         >
+          <Info className="w-5 h-5" />
+        </button>
+
+        {/* Attribution Card / Popover */}
+        {isOpen && (
+          <div
+            id="attribution-popover"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-0 top-13 w-72 sm:w-80 rounded-2xl bg-zinc-950/95 border border-white/15 p-4 backdrop-blur-3xl shadow-2xl space-y-3 z-[1300] text-left animate-in fade-in zoom-in-95 duration-150"
+          >
           <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
             <div className="flex items-center gap-2 text-sky-400 font-semibold text-xs tracking-wide">
               <Info className="w-4 h-4" />
@@ -116,5 +124,6 @@ export const AttributionButton: React.FC<Props> = ({ isNavigating }) => {
         </div>
       )}
     </div>
+    </>
   );
 };

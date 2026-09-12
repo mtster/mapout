@@ -226,53 +226,61 @@ export const MapView: React.FC<Props> = ({
 
     const existingSource = map.getSource(sourceId) as GeoJSONSource | undefined;
 
-    if (existingSource) {
-      existingSource.setData(geojson);
-    } else if (coords.length > 0) {
-      map.addSource(sourceId, {
-        type: 'geojson',
-        data: geojson,
-      });
+    if (coords.length > 0) {
+      if (existingSource) {
+        existingSource.setData(geojson);
+      } else {
+        map.addSource(sourceId, {
+          type: 'geojson',
+          data: geojson,
+        });
 
-      if (!map.getLayer(casingLayerId)) {
-        map.addLayer({
-          id: casingLayerId,
-          type: 'line',
-          source: sourceId,
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round',
-          },
-          paint: {
-            'line-color': '#0284c7',
-            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 6, 16, 11, 20, 16],
-            'line-opacity': 0.85,
-          },
+        if (!map.getLayer(casingLayerId)) {
+          map.addLayer({
+            id: casingLayerId,
+            type: 'line',
+            source: sourceId,
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+            },
+            paint: {
+              'line-color': '#0284c7',
+              'line-width': ['interpolate', ['linear'], ['zoom'], 10, 6, 16, 11, 20, 16],
+              'line-opacity': 0.85,
+            },
+          });
+        }
+
+        if (!map.getLayer(lineLayerId)) {
+          map.addLayer({
+            id: lineLayerId,
+            type: 'line',
+            source: sourceId,
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+            },
+            paint: {
+              'line-color': '#38bdf8',
+              'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 16, 6, 20, 10],
+              'line-opacity': 1.0,
+            },
+          });
+        }
+      }
+    } else {
+      // Coordinates empty / route cleared -> purge layer and source completely
+      if (existingSource) {
+        existingSource.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: [] },
         });
       }
-
-      if (!map.getLayer(lineLayerId)) {
-        map.addLayer({
-          id: lineLayerId,
-          type: 'line',
-          source: sourceId,
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round',
-          },
-          paint: {
-            'line-color': '#38bdf8',
-            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 16, 6, 20, 10],
-            'line-opacity': 1.0,
-          },
-        });
-      }
-    }
-
-    if (coords.length === 0 && existingSource) {
       if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
       if (map.getLayer(casingLayerId)) map.removeLayer(casingLayerId);
-      map.removeSource(sourceId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
     }
   };
 
@@ -331,40 +339,93 @@ export const MapView: React.FC<Props> = ({
     });
 
     let lastDblClickTime = 0;
+    let lastGestureEndTime = 0;
+    let clickDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelPendingClick = () => {
+      if (clickDebounceTimer) {
+        clearTimeout(clickDebounceTimer);
+        clickDebounceTimer = null;
+      }
+    };
+
     map.on('dblclick', () => {
       lastDblClickTime = Date.now();
+      cancelPendingClick();
     });
     
-    let lastGestureEndTime = 0;
-    map.on('zoomend', () => { lastGestureEndTime = Date.now(); });
-    map.on('dragend', () => { lastGestureEndTime = Date.now(); });
-
-    // Detect user manual pan/zoom to suspend auto-centering
-    map.on('dragstart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
-    map.on('rotatestart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
-    map.on('pitchstart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
-    map.on('zoomstart', (e) => {
-      if (e.originalEvent) onUserPanOrZoomRef.current?.();
+    map.on('zoomend', () => {
+      lastGestureEndTime = Date.now();
+      cancelPendingClick();
+    });
+    map.on('dragend', () => {
+      lastGestureEndTime = Date.now();
+      cancelPendingClick();
     });
 
-    // Click handler on map canvas
+    // Detect user manual pan/zoom to suspend auto-centering & cancel clicks
+    map.on('dragstart', (e) => {
+      cancelPendingClick();
+      if (e.originalEvent) onUserPanOrZoomRef.current?.();
+    });
+    map.on('rotatestart', (e) => {
+      cancelPendingClick();
+      if (e.originalEvent) onUserPanOrZoomRef.current?.();
+    });
+    map.on('pitchstart', (e) => {
+      cancelPendingClick();
+      if (e.originalEvent) onUserPanOrZoomRef.current?.();
+    });
+    map.on('zoomstart', (e) => {
+      cancelPendingClick();
+      if (e.originalEvent) onUserPanOrZoomRef.current?.();
+    });
+    map.on('movestart', cancelPendingClick);
+    map.on('touchstart', (e) => {
+      if (e.points && e.points.length > 1) {
+        cancelPendingClick();
+      }
+    });
+
+    // Click handler on map canvas with single-tap gesture debounce
     map.on('click', (e) => {
       if (isNavigatingRef.current) return;
       if (map.isMoving() || map.isZooming()) return;
       
-      // Prevent double tap from placing a pin
       const originalEvent = e.originalEvent as MouseEvent;
-      if (originalEvent && originalEvent.detail > 1) return;
-      
-      // Prevent synthetic clicks that fire right after a double tap gesture
-      if (Date.now() - lastDblClickTime < 500) return;
-      if (Date.now() - lastGestureEndTime < 300) return;
-
-      if (hasDestinationRef.current) {
-        onMapTapWithDestinationRef.current?.();
-      } else {
-        onMapClickRef.current?.([e.lngLat.lat, e.lngLat.lng]);
+      if (originalEvent && originalEvent.detail > 1) {
+        cancelPendingClick();
+        return;
       }
+      
+      // Prevent synthetic clicks that fire during or right after a double tap/drag gesture
+      if (Date.now() - lastDblClickTime < 600) {
+        cancelPendingClick();
+        return;
+      }
+      if (Date.now() - lastGestureEndTime < 400) {
+        cancelPendingClick();
+        return;
+      }
+
+      cancelPendingClick();
+
+      const clickedLat = e.lngLat.lat;
+      const clickedLng = e.lngLat.lng;
+
+      // Debounce single-tap slightly to allow double-tap and double-tap-and-drag gestures to cancel it
+      clickDebounceTimer = setTimeout(() => {
+        clickDebounceTimer = null;
+        if (map.isMoving() || map.isZooming()) return;
+        if (Date.now() - lastDblClickTime < 600) return;
+        if (Date.now() - lastGestureEndTime < 400) return;
+
+        if (hasDestinationRef.current) {
+          onMapTapWithDestinationRef.current?.();
+        } else {
+          onMapClickRef.current?.([clickedLat, clickedLng]);
+        }
+      }, 260);
     });
 
     // Observe parent container resize and update MapLibre canvas on mobile viewport shifts
@@ -384,6 +445,7 @@ export const MapView: React.FC<Props> = ({
     }
 
     return () => {
+      cancelPendingClick();
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
@@ -414,23 +476,47 @@ export const MapView: React.FC<Props> = ({
 
     if (route && route.geometry && route.geometry.length > 1 && !isNavigating) {
       const bounds = new LngLatBounds();
-      route.geometry.forEach((pt) => bounds.extend([pt[1], pt[0]]));
+      let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+
+      route.geometry.forEach((pt) => {
+        bounds.extend([pt[1], pt[0]]);
+        if (pt[0] < minLat) minLat = pt[0];
+        if (pt[0] > maxLat) maxLat = pt[0];
+        if (pt[1] < minLng) minLng = pt[1];
+        if (pt[1] > maxLng) maxLng = pt[1];
+      });
       
-      // Calculate responsive percentage-based padding so route is clearly framed above the bottom sheet
-      const screenH = typeof window !== 'undefined' ? Math.max(window.screen?.height || 0, window.innerHeight || 0) : 800;
-      const screenW = typeof window !== 'undefined' ? Math.max(window.screen?.width || 0, window.innerWidth || 0) : 400;
-      const topPadding = Math.max(100, Math.round(screenH * 0.14));
-      // When route sheet is expanded (~340px), pad bottom by ~46% of height so route stays squarely in upper 54%
-      // When collapsed (~80px), pad bottom by ~20% of height
-      const bottomPadding = isRouteSheetCollapsed
-        ? Math.max(160, Math.round(screenH * 0.20))
-        : Math.max(340, Math.round(screenH * 0.46));
-      const sidePadding = Math.max(35, Math.round(screenW * 0.10));
+      const container = map.getContainer();
+      const containerH = container?.clientHeight || window.innerHeight || 600;
+      const containerW = container?.clientWidth || window.innerWidth || 400;
+
+      let topPadding = Math.min(Math.round(containerH * 0.12), 90);
+      let bottomPadding = isRouteSheetCollapsed
+        ? Math.min(Math.round(containerH * 0.18), 120)
+        : Math.min(Math.round(containerH * 0.38), 260);
+      let sidePadding = Math.min(Math.round(containerW * 0.08), 40);
+
+      // Safeguard against padding exceeding container height (which causes map to zoom out to world level)
+      if (containerH - (topPadding + bottomPadding) < 180) {
+        const excess = (topPadding + bottomPadding) - (containerH - 180);
+        if (excess > 0) {
+          bottomPadding = Math.max(40, bottomPadding - Math.round(excess * 0.7));
+          topPadding = Math.max(30, topPadding - Math.round(excess * 0.3));
+        }
+      }
+
+      // Safe minimum zoom based on route extent so it never zooms out to world view
+      const maxSpan = Math.max(Math.abs(maxLat - minLat), Math.abs(maxLng - minLng));
+      let safeMinZoom = 13;
+      if (maxSpan > 2.0) safeMinZoom = 6;
+      else if (maxSpan > 0.5) safeMinZoom = 9;
+      else if (maxSpan > 0.1) safeMinZoom = 11;
 
       map.fitBounds(bounds, {
         padding: { top: topPadding, bottom: bottomPadding, left: sidePadding, right: sidePadding },
-        maxZoom: 16,
-        duration: 1000,
+        maxZoom: 16.5,
+        minZoom: safeMinZoom,
+        duration: 800,
       });
     }
   }, [route, isNavigating, isRouteSheetCollapsed]);

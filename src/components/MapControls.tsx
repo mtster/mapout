@@ -15,6 +15,7 @@ interface Props {
   onLocateMe: () => void;
   isLocating: boolean;
   hasUserLocation: boolean;
+  isCenteredOnUser?: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetNorth: () => void;
@@ -28,8 +29,9 @@ export const MapControls: React.FC<Props> = ({
   mapStyle,
   onChangeStyle,
   onLocateMe,
-  isLocating,
-  hasUserLocation,
+  isLocating: _isLocating,
+  hasUserLocation: _hasUserLocation,
+  isCenteredOnUser = true,
   onZoomIn,
   onZoomOut,
   onResetNorth,
@@ -142,21 +144,21 @@ export const MapControls: React.FC<Props> = ({
 
       {/* Locate Me button */}
       <button
+        id="locate-me-control-btn"
         onClick={onLocateMe}
         className={`w-11 h-11 rounded-2xl border backdrop-blur-2xl shadow-xl flex items-center justify-center transition active:scale-90 ${
-          hasUserLocation
-            ? 'bg-zinc-950/85 border-white/10 text-sky-400 hover:bg-zinc-900'
+          !isCenteredOnUser
+            ? 'bg-zinc-950/90 border-sky-400/60 text-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.25)] hover:bg-zinc-900'
             : 'bg-zinc-950/85 border-white/10 text-zinc-400 hover:text-white hover:bg-zinc-900'
         }`}
         title="Find my location"
+        aria-label="Find my location"
       >
-        {isLocating ? (
-          <div className="w-4 h-4 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
-        ) : (
-          <Navigation
-            className={`w-5 h-5 ${hasUserLocation ? 'fill-sky-400 text-sky-400' : 'text-zinc-400'}`}
-          />
-        )}
+        <Navigation
+          className={`w-5 h-5 transition-colors ${
+            !isCenteredOnUser ? 'fill-sky-400 text-sky-400' : 'text-zinc-400 fill-none'
+          }`}
+        />
       </button>
 
       {/* Zoom in & Zoom out */}
