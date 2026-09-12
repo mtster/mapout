@@ -603,7 +603,7 @@ export default function App() {
   };
 
   return (
-    <main id="main-view" className="fixed inset-0 w-full min-h-full overflow-hidden bg-black text-white select-none">
+    <main id="main-view" className="absolute inset-0 w-full h-full overflow-visible bg-black text-white select-none">
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
@@ -627,13 +627,13 @@ export default function App() {
         onBearingChange={setBearing}
       />
 
-      {/* Dummy white box below the map covering the gap between the bottom of the map and the bottom of the screen */}
+      {/* Hardware overhang white box: Starts exactly at bottom of layout container (top: 100%) and extends down into the hardware gap */}
       <div
         id="bottom-gap-white-box"
-        className="fixed bottom-0 left-0 right-0 w-full pointer-events-none z-10 bg-white"
+        className="absolute left-0 right-0 w-full pointer-events-none z-10 bg-white"
         style={{
-          height: 'max(env(safe-area-inset-bottom, 0px), 70px)',
-          bottom: 0,
+          top: '100%',
+          height: '120px',
         }}
         aria-hidden="true"
       />

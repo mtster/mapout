@@ -605,17 +605,7 @@ export const MapView: React.FC<Props> = ({
     <div
       ref={mapContainerRef}
       id="map-container"
-      className="fixed inset-0 bg-black cursor-crosshair z-0"
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: `${viewportDims.width}px`,
-        height: `${viewportDims.height}px`,
-        minHeight: `${viewportDims.height}px`,
-      }}
+      className="absolute inset-0 w-full h-full bg-black cursor-crosshair z-0"
     />
   );
 };
