@@ -211,7 +211,9 @@ export const RouteBottomSheet: React.FC<Props> = ({
           {/* Travel Mode Pills - Permanently mounted so switching vehicle modes has zero twitching */}
           <div className="grid grid-cols-3 gap-2 p-1 rounded-2xl bg-zinc-900/90 border border-white/5 mb-3">
             <button
-              onClick={() => onChangeMode('driving')}
+              onClick={() => {
+                if (travelMode !== 'driving') onChangeMode('driving');
+              }}
               className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold transition ${
                 travelMode === 'driving'
                   ? 'bg-white text-black shadow-md'
@@ -222,7 +224,9 @@ export const RouteBottomSheet: React.FC<Props> = ({
               <span>Drive</span>
             </button>
             <button
-              onClick={() => onChangeMode('cycling')}
+              onClick={() => {
+                if (travelMode !== 'cycling') onChangeMode('cycling');
+              }}
               className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold transition ${
                 travelMode === 'cycling'
                   ? 'bg-white text-black shadow-md'
@@ -233,7 +237,9 @@ export const RouteBottomSheet: React.FC<Props> = ({
               <span>Cycle</span>
             </button>
             <button
-              onClick={() => onChangeMode('walking')}
+              onClick={() => {
+                if (travelMode !== 'walking') onChangeMode('walking');
+              }}
               className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold transition ${
                 travelMode === 'walking'
                   ? 'bg-white text-black shadow-md'

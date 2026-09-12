@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Map as MapLibreMap, Marker, LngLatBounds, GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LatLng, MapStyle, RouteData, UserLocation } from '../types';
+import { smoothAngle } from '../services/mapService';
 
 interface Props {
   userLocation: UserLocation | null;
@@ -252,9 +253,12 @@ export const MapView: React.FC<Props> = ({
       onMapReady?.(map);
       map.resize();
       updateRouteLayer(map, routeRef.current);
+      requestAnimationFrame(() => map.resize());
+      setTimeout(() => map.resize(), 150);
     });
 
     map.on('style.load', () => {
+      map.resize();
       updateRouteLayer(map, routeRef.current);
     });
 
@@ -280,6 +284,13 @@ export const MapView: React.FC<Props> = ({
       }
     });
 
+    // Handle window resize and screen orientation change
+    const handleWindowResize = () => {
+      map.resize();
+    };
+    window.addEventListener('resize', handleWindowResize);
+    window.addEventListener('orientationchange', handleWindowResize);
+
     // Auto-resize on container dimensions change
     const observer = new ResizeObserver(() => {
       map.resize();
@@ -287,6 +298,8 @@ export const MapView: React.FC<Props> = ({
     observer.observe(mapContainerRef.current);
 
     return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      window.removeEventListener('orientationchange', handleWindowResize);
       observer.disconnect();
       map.remove();
       mapInstanceRef.current = null;
@@ -368,6 +381,7 @@ export const MapView: React.FC<Props> = ({
     const cone = el.querySelector('.heading-cone') as HTMLElement | null;
     if (cone) {
       if (typeof heading === 'number' && !isNaN(heading)) {
+        cone.style.transition = 'transform 0.8s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease';
         cone.style.opacity = '1';
         cone.style.transform = `rotate(${heading}deg) translateY(-8px)`;
       } else {
@@ -427,7 +441,7 @@ export const MapView: React.FC<Props> = ({
     }
   }, [destination, isNavigating]);
 
-  // 6. Navigation Follow Camera Engine (3D 45 deg driving perspective)
+  // 6. Navigation Follow Camera Engine (Fluid 60 FPS GPU-Accelerated 45 deg Perspective)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !isNavigating || !isFollowingUser) return;
@@ -436,17 +450,19 @@ export const MapView: React.FC<Props> = ({
       activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
     if (!targetCoord) return;
 
-    const bearing =
-      typeof targetHeading === 'number' && !isNaN(targetHeading)
-        ? targetHeading
-        : map.getBearing();
+    const currentBearing = map.getBearing();
+    let bearingToUse = currentBearing;
+    if (typeof targetHeading === 'number' && !isNaN(targetHeading)) {
+      bearingToUse = smoothAngle(currentBearing, targetHeading, 0.45);
+    }
 
     map.easeTo({
       center: [targetCoord[1], targetCoord[0]],
       zoom: standardNavZoom,
-      bearing,
+      bearing: bearingToUse,
       pitch: 45,
-      duration: 600,
+      duration: 950,
+      easing: (t) => t,
     });
   }, [activeNavLocation, userLocation, isNavigating, isFollowingUser, targetHeading, standardNavZoom]);
 

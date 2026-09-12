@@ -14,6 +14,7 @@ import {
   calculateBearing,
   calculateRemainingRouteTurf,
   snapToRoute,
+  getRouteHeadingAtPoint,
 } from './services/mapService';
 import { voiceGuidance } from './utils/voiceGuidance';
 import { useWakeLock } from './hooks/useWakeLock';
@@ -294,6 +295,7 @@ export default function App() {
 
   // 6. Travel mode changed
   const handleChangeMode = (mode: TravelMode) => {
+    if (mode === travelMode) return; // Prevent unnecessary refetch if already active
     setTravelMode(mode);
     try {
       localStorage.setItem('mapout_travel_mode', mode);
@@ -457,11 +459,16 @@ export default function App() {
           currentRoute &&
           currentRoute.geometry
         ) {
-          const nextTarget =
-            currentRoute.geometry[
-              Math.min(currentStepIndexRef.current + 1, currentRoute.geometry.length - 1)
-            ];
-          roadHeading = calculateBearing(rawCoords, nextTarget);
+          const routeTangent = getRouteHeadingAtPoint(rawCoords, currentRoute.geometry);
+          if (routeTangent !== null) {
+            roadHeading = routeTangent;
+          } else {
+            const nextTarget =
+              currentRoute.geometry[
+                Math.min(currentStepIndexRef.current + 1, currentRoute.geometry.length - 1)
+              ];
+            roadHeading = calculateBearing(rawCoords, nextTarget);
+          }
         }
         if (roadHeading !== null && roadHeading !== undefined && !isNaN(roadHeading)) {
           setCurrentNavHeading(roadHeading);

@@ -39,10 +39,7 @@ main {
 }
 
 /* Map container full bleed under safe areas & stacking isolation */
-#map-container,
-.maplibregl-map,
-.maplibregl-canvas-container,
-.maplibregl-canvas {
+#map-container {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
@@ -51,14 +48,26 @@ main {
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  height: 100dvh !important;
-  min-height: 100% !important;
-  min-height: -webkit-fill-available !important;
   margin: 0 !important;
   padding: 0 !important;
   background: #000000 !important;
   outline: none;
   z-index: 0 !important;
+  overflow: hidden !important;
+}
+
+.maplibregl-map {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #000000 !important;
 }
 
 /* Minimalist dark attribution */
@@ -84,11 +93,12 @@ main {
   display: none !important;
 }
 
-/* User Location Marker styling */
+/* User Location Marker styling - Smooth interpolation between 1Hz GPS pings */
 .user-location-marker {
-  transition: transform 0.2s ease-out;
+  transition: transform 0.9s cubic-bezier(0.25, 1, 0.5, 1);
   will-change: transform;
 }
+
 
 /* Custom scrollbars */
 ::-webkit-scrollbar {

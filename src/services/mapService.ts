@@ -427,3 +427,34 @@ export function calculateBearing(start: LatLng, end: LatLng): number {
     return (bearing + 360) % 360;
   }
 }
+
+// Calculate the shortest signed angular difference (-180 to +180) between two bearings
+export function getShortestAngleDiff(fromAngle: number, toAngle: number): number {
+  return ((((toAngle - fromAngle) % 360) + 540) % 360) - 180;
+}
+
+// Exponential Moving Average angle smoother for smooth, jitter-free compass & road camera rotation
+export function smoothAngle(currentAngle: number, targetAngle: number, factor = 0.35): number {
+  const diff = getShortestAngleDiff(currentAngle, targetAngle);
+  const smoothed = currentAngle + diff * factor;
+  return (smoothed + 360) % 360;
+}
+
+// Calculate the road heading at a given coordinate along the route polyline using Turf
+export function getRouteHeadingAtPoint(currentPos: LatLng, geometry: LatLng[]): number | null {
+  if (!geometry || geometry.length < 2) return null;
+  try {
+    const pt = turf.point([currentPos[1], currentPos[0]]);
+    const line = turf.lineString(geometry.map((c) => [c[1], c[0]]));
+    const nearest = turf.nearestPointOnLine(line, pt, { units: 'kilometers' });
+    const index = nearest.properties.index ?? 0;
+
+    if (index < geometry.length - 1) {
+      return calculateBearing(geometry[index], geometry[index + 1]);
+    }
+    return calculateBearing(geometry[geometry.length - 2], geometry[geometry.length - 1]);
+  } catch {
+    return null;
+  }
+}
+
