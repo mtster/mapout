@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Map as MapLibreMap, Marker, LngLatBounds, GeoJSONSource, AttributionControl } from 'maplibre-gl';
+import { Map as MapLibreMap, Marker, LngLatBounds, GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LatLng, MapStyle, RouteData, UserLocation } from '../types';
 import { smoothAngle } from '../services/mapService';
@@ -21,6 +21,7 @@ interface Props {
   standardNavZoom?: number;
   recenterTrigger?: number;
   onBearingChange?: (bearing: number) => void;
+  isRouteSheetCollapsed?: boolean;
 }
 
 // 100% Free, Vector, Hardware-Accelerated Basemap Styles from OpenFreeMap
@@ -75,6 +76,7 @@ export const MapView: React.FC<Props> = ({
   standardNavZoom = 17,
   recenterTrigger,
   onBearingChange,
+  isRouteSheetCollapsed = false,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMap | null>(null);
@@ -83,30 +85,100 @@ export const MapView: React.FC<Props> = ({
   const routeRef = useRef<RouteData | null>(route);
   routeRef.current = route;
 
-  // Keep map properly resized on any viewport/window dimension shifts
+  // Calculate and apply exact physical dimensions of the device in pixels to the map,
+  // bypassing iOS WebKit viewport trimming at the bottom home indicator bar.
   useEffect(() => {
-    const handleViewportChange = () => {
+    const applyExactDimensions = () => {
+      const isLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight;
+      const screenH = window.screen?.height || 0;
+      const screenW = window.screen?.width || 0;
+      const innerH = window.innerHeight || 0;
+      const innerW = window.innerWidth || 0;
+      const vvH = window.visualViewport?.height || 0;
+      const vvW = window.visualViewport?.width || 0;
+      const docH = document.documentElement?.clientHeight || 0;
+      const docW = document.documentElement?.clientWidth || 0;
+
+      // In iOS or mobile, screen.height represents the true unconstrained physical screen,
+      // which extends all the way under the home bar and safe areas.
+      const maxScreenDim = Math.max(screenH, screenW);
+      const minScreenDim = Math.min(screenH, screenW);
+      const fullScreenH = isLandscape ? minScreenDim : maxScreenDim;
+      const fullScreenW = isLandscape ? maxScreenDim : minScreenDim;
+
+      const targetHeight = Math.max(fullScreenH, innerH, vvH, docH);
+      const targetWidth = Math.max(fullScreenW, innerW, vvW, docW);
+
+      // Physically force the map container element
+      const container = mapContainerRef.current;
+      if (container) {
+        container.style.setProperty('height', `${targetHeight}px`, 'important');
+        container.style.setProperty('min-height', `${targetHeight}px`, 'important');
+        container.style.setProperty('width', `${targetWidth}px`, 'important');
+        container.style.setProperty('min-width', `${targetWidth}px`, 'important');
+      }
+
+      // Physically force the map canvas and its container
+      if (container) {
+        const canvasContainer = container.querySelector('.maplibregl-canvas-container') as HTMLElement | null;
+        const canvas = container.querySelector('.maplibregl-canvas') as HTMLElement | null;
+        if (canvasContainer) {
+          canvasContainer.style.setProperty('height', `${targetHeight}px`, 'important');
+          canvasContainer.style.setProperty('width', `${targetWidth}px`, 'important');
+        }
+        if (canvas) {
+          canvas.style.setProperty('height', `${targetHeight}px`, 'important');
+          canvas.style.setProperty('width', `${targetWidth}px`, 'important');
+        }
+      }
+
+      // Also force document body and root
+      document.documentElement.style.setProperty('height', `${targetHeight}px`, 'important');
+      document.documentElement.style.setProperty('min-height', `${targetHeight}px`, 'important');
+      document.body.style.setProperty('height', `${targetHeight}px`, 'important');
+      document.body.style.setProperty('min-height', `${targetHeight}px`, 'important');
+
+      const rootEl = document.getElementById('root');
+      if (rootEl) {
+        rootEl.style.setProperty('height', `${targetHeight}px`, 'important');
+        rootEl.style.setProperty('min-height', `${targetHeight}px`, 'important');
+      }
+
+      const mainEl = document.getElementById('main-view');
+      if (mainEl) {
+        mainEl.style.setProperty('height', `${targetHeight}px`, 'important');
+        mainEl.style.setProperty('min-height', `${targetHeight}px`, 'important');
+      }
+
       if (mapInstanceRef.current) {
         mapInstanceRef.current.resize();
       }
     };
 
-    window.addEventListener('resize', handleViewportChange);
-    window.addEventListener('orientationchange', handleViewportChange);
+    applyExactDimensions();
+
+    window.addEventListener('resize', applyExactDimensions);
+    window.addEventListener('orientationchange', applyExactDimensions);
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleViewportChange);
+      window.visualViewport.addEventListener('resize', applyExactDimensions);
     }
 
-    const t1 = setTimeout(handleViewportChange, 100);
-    const t2 = setTimeout(handleViewportChange, 500);
+    const t1 = setTimeout(applyExactDimensions, 50);
+    const t2 = setTimeout(applyExactDimensions, 150);
+    const t3 = setTimeout(applyExactDimensions, 300);
+    const t4 = setTimeout(applyExactDimensions, 600);
+    const t5 = setTimeout(applyExactDimensions, 1200);
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
-      window.removeEventListener('resize', handleViewportChange);
-      window.removeEventListener('orientationchange', handleViewportChange);
+      clearTimeout(t3);
+      clearTimeout(t4);
+      clearTimeout(t5);
+      window.removeEventListener('resize', applyExactDimensions);
+      window.removeEventListener('orientationchange', applyExactDimensions);
       if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', handleViewportChange);
+        window.visualViewport.removeEventListener('resize', applyExactDimensions);
       }
     };
   }, []);
@@ -228,8 +300,7 @@ export const MapView: React.FC<Props> = ({
       attributionControl: false,
     });
 
-    map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
-
+    // Custom AttributionButton is mounted seamlessly in top-left corner below search bar
     mapInstanceRef.current = map;
 
     map.on('load', () => {
@@ -346,11 +417,15 @@ export const MapView: React.FC<Props> = ({
       route.geometry.forEach((pt) => bounds.extend([pt[1], pt[0]]));
       
       // Calculate responsive percentage-based padding so route is clearly framed above the bottom sheet
-      const screenH = typeof window !== 'undefined' ? window.innerHeight : 800;
-      const screenW = typeof window !== 'undefined' ? window.innerWidth : 400;
-      const topPadding = Math.max(90, Math.round(screenH * 0.12));
-      const bottomPadding = Math.max(280, Math.round(screenH * 0.42));
-      const sidePadding = Math.max(30, Math.round(screenW * 0.08));
+      const screenH = typeof window !== 'undefined' ? Math.max(window.screen?.height || 0, window.innerHeight || 0) : 800;
+      const screenW = typeof window !== 'undefined' ? Math.max(window.screen?.width || 0, window.innerWidth || 0) : 400;
+      const topPadding = Math.max(100, Math.round(screenH * 0.14));
+      // When route sheet is expanded (~340px), pad bottom by ~46% of height so route stays squarely in upper 54%
+      // When collapsed (~80px), pad bottom by ~20% of height
+      const bottomPadding = isRouteSheetCollapsed
+        ? Math.max(160, Math.round(screenH * 0.20))
+        : Math.max(340, Math.round(screenH * 0.46));
+      const sidePadding = Math.max(35, Math.round(screenW * 0.10));
 
       map.fitBounds(bounds, {
         padding: { top: topPadding, bottom: bottomPadding, left: sidePadding, right: sidePadding },
@@ -358,7 +433,7 @@ export const MapView: React.FC<Props> = ({
         duration: 1000,
       });
     }
-  }, [route, isNavigating]);
+  }, [route, isNavigating, isRouteSheetCollapsed]);
 
   // 4. Render and update User Location marker (with accuracy ring & heading cone)
   useEffect(() => {

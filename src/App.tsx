@@ -7,6 +7,7 @@ import { RouteBottomSheet } from './components/RouteBottomSheet';
 import { NavigationHUD } from './components/NavigationHUD';
 import { MapControls } from './components/MapControls';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { AttributionButton } from './components/AttributionButton';
 import {
   calculateRoute,
   reverseGeocode,
@@ -263,7 +264,13 @@ export default function App() {
     setSelectedDestination(place);
     setIsRouteSheetCollapsed(false);
     if (mapInstance) {
-      mapInstance.flyTo({ center: [place.lng, place.lat], zoom: 15, duration: 1200 });
+      const padBottom = Math.round((window.screen?.height || window.innerHeight) * 0.35);
+      mapInstance.flyTo({
+        center: [place.lng, place.lat],
+        zoom: 15,
+        duration: 1200,
+        padding: { top: 0, bottom: padBottom, left: 0, right: 0 },
+      });
     }
     fetchRoute([place.lat, place.lng], place.name, travelMode);
   };
@@ -625,6 +632,7 @@ export default function App() {
         standardNavZoom={STANDARD_NAV_ZOOM[travelMode]}
         recenterTrigger={recenterTrigger}
         onBearingChange={setBearing}
+        isRouteSheetCollapsed={isRouteSheetCollapsed}
       />
 
       {/* Top Search Bar (idle state) */}
@@ -635,6 +643,9 @@ export default function App() {
         selectedDestination={selectedDestination}
         isNavigating={isNavigating}
       />
+
+      {/* Attribution Button (Top-left below search bar, matching bottom-right control button styling) */}
+      <AttributionButton isNavigating={isNavigating} />
 
       {/* Location Permission Notification Toast */}
       {locationErrorMsg && (
