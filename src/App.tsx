@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Map as MapLibreMap } from 'maplibre-gl';
-import { MapStyle, TravelMode } from './types';
+import { MapStyle, TravelMode, LatLng } from './types';
 import { MapView } from './components/MapView';
 import { SearchBar } from './components/SearchBar';
 import { RouteBottomSheet } from './components/RouteBottomSheet';
@@ -23,6 +23,11 @@ export default function App() {
   const [mapInstance, setMapInstance] = useState<MapLibreMap | null>(null);
   const [mapStyle, setMapStyle] = useState<MapStyle>('dark');
   const [isStepsOpen, setIsStepsOpen] = useState(false);
+
+  // Open states for overlay menus/dropdowns
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isAttributionOpen, setIsAttributionOpen] = useState(false);
+  const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
 
   // Prevent browser window bouncing on pull gestures
   useEffect(() => {
@@ -132,6 +137,30 @@ export default function App() {
     setIsStepsOpen((prev) => (typeof open === 'boolean' ? open : !prev));
   }, []);
 
+  // Intercept map click to act as a cancel/dismiss gesture if any menu or search dropdown is open
+  const handleMapClickIntercepted = useCallback(
+    (coords: LatLng) => {
+      if (isSearchOpen || isAttributionOpen || isLayerMenuOpen) {
+        setIsSearchOpen(false);
+        setIsAttributionOpen(false);
+        setIsLayerMenuOpen(false);
+        return; // Cancel action only; do not drop pin
+      }
+      handleMapClick(coords);
+    },
+    [isSearchOpen, isAttributionOpen, isLayerMenuOpen, handleMapClick]
+  );
+
+  const handleMapTapWithDestinationIntercepted = useCallback(() => {
+    if (isSearchOpen || isAttributionOpen || isLayerMenuOpen) {
+      setIsSearchOpen(false);
+      setIsAttributionOpen(false);
+      setIsLayerMenuOpen(false);
+      return; // Cancel action only; do not collapse sheet
+    }
+    handleMapTapWithDestination();
+  }, [isSearchOpen, isAttributionOpen, isLayerMenuOpen, handleMapTapWithDestination]);
+
   return (
     <main id="main-view" className="absolute inset-0 w-full h-full overflow-hidden bg-black text-white select-none touch-none">
       {/* Offline Connectivity Notification */}
@@ -146,8 +175,8 @@ export default function App() {
         isNavigating={isNavigating}
         activeNavLocation={activeNavLocation}
         hasDestination={!!selectedDestination}
-        onMapClick={handleMapClick}
-        onMapTapWithDestination={handleMapTapWithDestination}
+        onMapClick={handleMapClickIntercepted}
+        onMapTapWithDestination={handleMapTapWithDestinationIntercepted}
         onMapReady={setMapInstance}
         isFollowingUser={isFollowingUser}
         onUserPanOrZoom={handleUserPanOrZoom}
@@ -165,10 +194,16 @@ export default function App() {
         onClearDestination={handleClearDestination}
         selectedDestination={selectedDestination}
         isNavigating={isNavigating}
+        isOpen={isSearchOpen}
+        onOpenChange={setIsSearchOpen}
       />
 
       {/* Attribution Button (Top-left below search bar) */}
-      <AttributionButton isNavigating={isNavigating} />
+      <AttributionButton
+        isNavigating={isNavigating}
+        isOpen={isAttributionOpen}
+        onOpenChange={setIsAttributionOpen}
+      />
 
       {/* Location Permission Notification Toast */}
       {locationErrorMsg && (
@@ -202,6 +237,8 @@ export default function App() {
         hasActiveDestination={!!route && !isNavigating}
         isRouteSheetCollapsed={isRouteSheetCollapsed}
         isStepsOpen={isStepsOpen}
+        isLayerMenuOpen={isLayerMenuOpen}
+        onLayerMenuOpenChange={setIsLayerMenuOpen}
       />
 
       {/* Native Route Bottom Sheet */}

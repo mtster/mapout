@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, MapPin, Navigation2, Coffee, Utensils, Fuel, ShoppingBag, TreePine, Loader2 } from 'lucide-react';
+import { Search, X, Coffee, Utensils, Fuel, ShoppingBag, TreePine, Loader2 } from 'lucide-react';
 import { PlaceResult, LatLng } from '../types';
 import { searchPlaces, formatDistance } from '../services/mapService';
 import { PWAInstallModal } from './PWAInstallModal';
@@ -10,6 +10,8 @@ interface Props {
   onClearDestination: () => void;
   selectedDestination: PlaceResult | null;
   isNavigating: boolean;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const QUICK_CATEGORIES = [
@@ -26,14 +28,22 @@ export const SearchBar: React.FC<Props> = ({
   onClearDestination,
   selectedDestination,
   isNavigating,
+  isOpen: externalIsOpen,
+  onOpenChange,
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
+  const setIsOpen = (open: boolean) => {
+    setInternalIsOpen(open);
+    onOpenChange?.(open);
+  };
 
   const userLocationRef = useRef(userLocation);
   useEffect(() => {
@@ -125,11 +135,11 @@ export const SearchBar: React.FC<Props> = ({
   return (
     <div
       ref={searchContainerRef}
-      className="absolute top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-[1200] flex flex-col gap-2 pointer-events-auto"
+      className="absolute top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-[1400] flex flex-col gap-2 pointer-events-auto"
       style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
     >
       {/* Search Header Bar */}
-      <div className="relative flex items-center w-full h-12 rounded-2xl bg-zinc-950/85 backdrop-blur-2xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.6)] px-3.5 transition-all focus-within:border-white/30 focus-within:ring-1 focus-within:ring-white/20">
+      <div className="relative flex items-center w-full h-12 rounded-2xl bg-zinc-950/90 backdrop-blur-2xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.6)] px-3.5 transition-all focus-within:border-white/30 focus-within:ring-1 focus-within:ring-white/20">
         <div className="flex items-center justify-center text-zinc-400 mr-2.5">
           {isSearching ? (
             <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
@@ -189,39 +199,31 @@ export const SearchBar: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Autocomplete Results Dropdown */}
+      {/* Autocomplete Results Dropdown - Clean styling, distance aligned to right edge, no icons */}
       {isOpen && results.length > 0 && (
         <div
           id="search-results-list"
-          className="w-full max-h-72 overflow-y-auto scrollable-content rounded-2xl bg-zinc-950/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.8)] divide-y divide-zinc-900"
+          className="w-full max-h-72 overflow-y-auto scrollable-content rounded-2xl bg-zinc-950/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.85)] divide-y divide-zinc-900"
         >
           {results.map((place) => (
             <button
               key={place.id}
               onClick={() => handleSelect(place)}
-              className="w-full flex items-start gap-3 p-3.5 text-left hover:bg-zinc-900/70 active:bg-zinc-800/80 transition group"
+              className="w-full flex items-center justify-between gap-3 p-3.5 text-left hover:bg-zinc-900/70 active:bg-zinc-800/80 transition"
             >
-              <div className="p-2 rounded-xl bg-zinc-900 text-zinc-400 group-hover:text-sky-400 group-hover:bg-zinc-800 transition mt-0.5 shrink-0 border border-white/5">
-                <MapPin className="w-4 h-4" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-white truncate group-hover:text-sky-300 transition">
-                    {place.name}
-                  </span>
-                  {typeof place.distanceMeters === 'number' && (
-                    <span className="text-[11px] font-semibold text-sky-400/90 shrink-0 bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-800/30">
-                      {formatDistance(place.distanceMeters)}
-                    </span>
-                  )}
+              <div className="flex-1 min-w-0 pr-2">
+                <div className="text-sm font-medium text-white truncate">
+                  {place.name}
                 </div>
                 <div className="text-xs text-zinc-400 truncate mt-0.5">
                   {place.label}
                 </div>
               </div>
-              <div className="shrink-0 self-center text-zinc-500 group-hover:text-white ml-1">
-                <Navigation2 className="w-3.5 h-3.5" />
-              </div>
+              {typeof place.distanceMeters === 'number' && (
+                <div className="shrink-0 text-xs text-zinc-400 font-normal tabular-nums self-center">
+                  {formatDistance(place.distanceMeters)}
+                </div>
+              )}
             </button>
           ))}
         </div>

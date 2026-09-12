@@ -74,7 +74,9 @@ export function updateUserLocationMarker(
 }
 
 /**
- * Creates or updates the Destination Pin marker
+ * Creates or updates the Destination Pin marker.
+ * The bottom pointer tip of the pin is anchored strictly at the exact dropped coordinate.
+ * Any scaling transforms grow upwards from the needle tip (origin: 50% 100%).
  */
 export function updateDestinationMarker(
   map: MapLibreMap,
@@ -93,24 +95,27 @@ export function updateDestinationMarker(
 
   if (!destMarkerRef.current) {
     const el = document.createElement('div');
-    el.className = 'destination-marker cursor-grab active:cursor-grabbing transition-transform hover:scale-110 origin-bottom';
+    el.className = 'destination-marker cursor-grab active:cursor-grabbing transition-transform duration-200 hover:scale-110';
     el.style.width = '32px';
-    el.style.height = '42px';
+    el.style.height = '44px';
+    el.style.transformOrigin = '16px 44px'; // Strictly pivot around the needle tip
 
+    // Crisp SVG Pin with needle tip terminating precisely at bottom-center (16px, 44px)
     el.innerHTML = `
-      <div class="relative flex flex-col items-center justify-center translate-y-1/4">
-        <div class="w-7 h-7 rounded-full bg-sky-500 border-[3px] border-black shadow-[0_0_20px_rgba(14,165,233,0.8)] flex items-center justify-center text-white relative z-10">
-          <div class="w-2.5 h-2.5 bg-white rounded-full"></div>
-        </div>
-        <div class="w-1 h-5 bg-sky-500 -mt-1 shadow-lg relative z-0"></div>
-        <div class="w-3 h-1 bg-black/60 rounded-full blur-[2px] mt-0.5"></div>
-      </div>
+      <svg width="32" height="44" viewBox="0 0 32 44" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; overflow:visible;">
+        <!-- Needle shadow -->
+        <ellipse cx="16" cy="43.5" rx="3.5" ry="1.2" fill="rgba(0,0,0,0.6)" />
+        <!-- Pin Body -->
+        <path d="M16 43.5 C 16 43.5, 2.5 24, 2.5 15 C 2.5 7.544 8.544 1.5 16 1.5 C 23.456 1.5 29.5 7.544 29.5 15 C 29.5 24, 16 43.5, 16 43.5 Z" fill="#0ea5e9" stroke="#000000" stroke-width="2.5" stroke-linejoin="round"/>
+        <!-- Inner Core -->
+        <circle cx="16" cy="15" r="5" fill="#ffffff" stroke="#0284c7" stroke-width="1.5"/>
+      </svg>
     `;
 
     const marker = new Marker({
       element: el,
       draggable: !isNavigating,
-      anchor: 'bottom',
+      anchor: 'bottom', // Anchors (16px, 44px) to the exact GPS coordinate
     })
       .setLngLat([destination.lng, destination.lat])
       .addTo(map);

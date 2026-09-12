@@ -3,7 +3,8 @@ import { LatLng, RouteData } from '../../types';
 import { smoothAngle } from '../../services/turfMathService';
 
 /**
- * Frames the route within the visible viewport above the route bottom sheet in a single smooth motion
+ * Frames the route within the visible viewport above the route bottom sheet in a single smooth, direct motion.
+ * Uses cameraForBounds + easeTo to completely eliminate the zoom-out-then-zoom-in flight arc.
  */
 export function fitRouteBounds(
   map: MapLibreMap,
@@ -27,36 +28,39 @@ export function fitRouteBounds(
   const containerH = container?.clientHeight || window.innerHeight || 600;
   const containerW = container?.clientWidth || window.innerWidth || 400;
 
-  let topPadding = Math.min(Math.round(containerH * 0.12), 90);
+  // Space for search bar at top (~80px) and route sheet at bottom (~270px)
+  let topPadding = Math.min(Math.round(containerH * 0.14), 100);
   let bottomPadding = isRouteSheetCollapsed
-    ? Math.min(Math.round(containerH * 0.18), 120)
-    : Math.min(Math.round(containerH * 0.38), 260);
-  let sidePadding = Math.min(Math.round(containerW * 0.08), 40);
+    ? Math.min(Math.round(containerH * 0.16), 110)
+    : Math.min(Math.round(containerH * 0.42), 290);
+  let sidePadding = Math.min(Math.round(containerW * 0.08), 44);
 
   // Safeguard against padding exceeding container height
-  if (containerH - (topPadding + bottomPadding) < 180) {
-    const excess = (topPadding + bottomPadding) - (containerH - 180);
+  if (containerH - (topPadding + bottomPadding) < 160) {
+    const excess = (topPadding + bottomPadding) - (containerH - 160);
     if (excess > 0) {
-      bottomPadding = Math.max(40, bottomPadding - Math.round(excess * 0.7));
-      topPadding = Math.max(30, topPadding - Math.round(excess * 0.3));
+      bottomPadding = Math.max(50, bottomPadding - Math.round(excess * 0.7));
+      topPadding = Math.max(40, topPadding - Math.round(excess * 0.3));
     }
   }
 
-  // Safe minimum zoom based on route extent so it never zooms out to world view
-  const maxSpan = Math.max(Math.abs(maxLat - minLat), Math.abs(maxLng - minLng));
-  let safeMinZoom = 13;
-  if (maxSpan > 2.0) safeMinZoom = 6;
-  else if (maxSpan > 0.5) safeMinZoom = 9;
-  else if (maxSpan > 0.1) safeMinZoom = 11;
-
-  // Single fluid motion: directly fly / ease without bouncing
-  map.fitBounds(bounds, {
+  // Calculate target camera options directly without triggering flyTo arc
+  const targetCamera = map.cameraForBounds(bounds, {
     padding: { top: topPadding, bottom: bottomPadding, left: sidePadding, right: sidePadding },
     maxZoom: 16.5,
-    minZoom: safeMinZoom,
-    duration: 850,
-    animate: true,
   });
+
+  if (targetCamera && targetCamera.center && typeof targetCamera.zoom === 'number') {
+    // Single fluid smooth motion directly to the destination bounds without zooming out first
+    map.easeTo({
+      center: targetCamera.center,
+      zoom: targetCamera.zoom,
+      bearing: 0,
+      pitch: 0,
+      duration: 850,
+      easing: (t) => 1 - Math.pow(1 - t, 3), // Smooth cubic ease-out
+    });
+  }
 }
 
 /**

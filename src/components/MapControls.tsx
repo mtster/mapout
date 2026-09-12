@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Navigation,
   Compass,
@@ -24,6 +24,8 @@ interface Props {
   hasActiveDestination?: boolean;
   isRouteSheetCollapsed?: boolean;
   isStepsOpen?: boolean;
+  isLayerMenuOpen?: boolean;
+  onLayerMenuOpenChange?: (open: boolean) => void;
 }
 
 export const MapControls: React.FC<Props> = ({
@@ -41,9 +43,18 @@ export const MapControls: React.FC<Props> = ({
   hasActiveDestination = false,
   isRouteSheetCollapsed = false,
   isStepsOpen = false,
+  isLayerMenuOpen: externalIsLayerMenuOpen,
+  onLayerMenuOpenChange,
 }) => {
-  const [showLayerMenu, setShowLayerMenu] = useState(false);
+  const [internalIsLayerMenuOpen, setInternalIsLayerMenuOpen] = React.useState(false);
   const layerMenuRef = useRef<HTMLDivElement>(null);
+
+  const showLayerMenu =
+    externalIsLayerMenuOpen !== undefined ? externalIsLayerMenuOpen : internalIsLayerMenuOpen;
+  const setShowLayerMenu = (open: boolean) => {
+    setInternalIsLayerMenuOpen(open);
+    onLayerMenuOpenChange?.(open);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -64,15 +75,16 @@ export const MapControls: React.FC<Props> = ({
 
   const isRotated = Math.abs(bearing % 360) > 1;
 
-  // Exact rigid binding to bottom sheet motion: zero lag, identical CSS easing curve
+  // The distance between the control buttons themselves is exactly 8px (gap-2).
+  // We offset the container so the bottom-most button is separated from the HUD upper edge by that exact same 8px.
   let yOffset = '0px';
   if (hasActiveDestination) {
     if (isRouteSheetCollapsed) {
-      yOffset = 'calc(-84px - max(env(safe-area-inset-bottom, 0px), 16px) + 6px)';
+      yOffset = 'calc(-78px - max(env(safe-area-inset-bottom, 0px), 16px) + 8px)';
     } else if (isStepsOpen) {
-      yOffset = 'calc(-468px - max(env(safe-area-inset-bottom, 0px), 16px) + 6px)';
+      yOffset = 'calc(-466px - max(env(safe-area-inset-bottom, 0px), 16px) + 8px)';
     } else {
-      yOffset = 'calc(-268px - max(env(safe-area-inset-bottom, 0px), 16px) + 6px)';
+      yOffset = 'calc(-248px - max(env(safe-area-inset-bottom, 0px), 16px) + 8px)';
     }
   }
 
@@ -80,7 +92,7 @@ export const MapControls: React.FC<Props> = ({
     <div
       className="fixed right-3 sm:right-6 z-[1200] flex flex-col gap-2 pointer-events-auto transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
       style={{
-        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 12px)',
+        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 16px)',
         transform: `translate3d(0, ${yOffset}, 0)`,
       }}
     >
