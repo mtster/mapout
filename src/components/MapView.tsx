@@ -23,62 +23,14 @@ interface Props {
   onBearingChange?: (bearing: number) => void;
 }
 
-// 100% Reliable, Hardware-Accelerated Basemap Styles
-// Guaranteed to load immediately without external font/sprite server dependencies
-const MAP_STYLES: Record<MapStyle, object> = {
-  // Obsidian Dark: Iconic CARTO Dark Matter (natively dark, high contrast, luminous roads)
-  dark: {
-    version: 8,
-    sources: {
-      'carto-dark': {
-        type: 'raster',
-        tiles: [
-          'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-          'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-          'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-          'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        ],
-        tileSize: 256,
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-      },
-    },
-    layers: [
-      {
-        id: 'carto-dark-layer',
-        type: 'raster',
-        source: 'carto-dark',
-        minzoom: 0,
-        maxzoom: 20,
-      },
-    ],
-  },
+// 100% Free, Vector, Hardware-Accelerated Basemap Styles from OpenFreeMap
+// Zero API Keys, Zero Watermarks, Native 60 FPS WebGL Vector Rendering
+const MAP_STYLES: Record<MapStyle, string | object> = {
+  // Obsidian Dark: Native Dark Vector map from OpenFreeMap
+  dark: 'https://tiles.openfreemap.org/styles/dark',
 
-  // Pure Midnight: High-Contrast Dark Street & Terrain Basemap
-  midnight: {
-    version: 8,
-    sources: {
-      'carto-midnight': {
-        type: 'raster',
-        tiles: [
-          'https://a.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
-          'https://b.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
-          'https://c.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
-          'https://d.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
-        ],
-        tileSize: 256,
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-      },
-    },
-    layers: [
-      {
-        id: 'carto-midnight-layer',
-        type: 'raster',
-        source: 'carto-midnight',
-        minzoom: 0,
-        maxzoom: 20,
-      },
-    ],
-  },
+  // Pure Midnight: High-contrast detailed vector streets from OpenFreeMap
+  midnight: 'https://tiles.openfreemap.org/styles/liberty',
 
   // Photorealistic Satellite: Esri High-Resolution World Imagery
   satellite: {
@@ -224,6 +176,8 @@ export const MapView: React.FC<Props> = ({
     }
   };
 
+  const isInitialMountRef = useRef(true);
+
   // 1. Initialize MapLibre GL Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -249,17 +203,26 @@ export const MapView: React.FC<Props> = ({
 
     mapInstanceRef.current = map;
 
+    const triggerResize = () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.resize();
+      }
+    };
+
     map.on('load', () => {
       onMapReady?.(map);
-      map.resize();
+      triggerResize();
       updateRouteLayer(map, routeRef.current);
-      requestAnimationFrame(() => map.resize());
-      setTimeout(() => map.resize(), 150);
+      // Run staggered resizes to accommodate initial CSS and container layout calculations
+      [0, 50, 150, 300, 600, 1000].forEach((delay) => {
+        setTimeout(triggerResize, delay);
+      });
     });
 
     map.on('style.load', () => {
-      map.resize();
+      triggerResize();
       updateRouteLayer(map, routeRef.current);
+      setTimeout(triggerResize, 100);
     });
 
     map.on('rotate', () => {
@@ -285,29 +248,30 @@ export const MapView: React.FC<Props> = ({
     });
 
     // Handle window resize and screen orientation change
-    const handleWindowResize = () => {
-      map.resize();
-    };
-    window.addEventListener('resize', handleWindowResize);
-    window.addEventListener('orientationchange', handleWindowResize);
+    window.addEventListener('resize', triggerResize);
+    window.addEventListener('orientationchange', triggerResize);
 
     // Auto-resize on container dimensions change
     const observer = new ResizeObserver(() => {
-      map.resize();
+      triggerResize();
     });
     observer.observe(mapContainerRef.current);
 
     return () => {
-      window.removeEventListener('resize', handleWindowResize);
-      window.removeEventListener('orientationchange', handleWindowResize);
+      window.removeEventListener('resize', triggerResize);
+      window.removeEventListener('orientationchange', triggerResize);
       observer.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []); // Run once on mount
 
-  // 2. Map Style Switcher
+  // 2. Map Style Switcher (only when user actively changes style)
   useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
     const map = mapInstanceRef.current;
     if (!map) return;
     map.setStyle(MAP_STYLES[mapStyle] as any);
