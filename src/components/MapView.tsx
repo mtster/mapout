@@ -217,6 +217,25 @@ export const MapView: React.FC<Props> = ({
       onBearingChangeRef.current?.(map.getBearing());
     });
 
+    // Re-apply route after style changes
+    map.on('styledata', () => {
+      if (map.isStyleLoaded() && routeRef.current) {
+        const sourceId = 'active-route-source';
+        if (!map.getSource(sourceId)) {
+          updateRouteLayer(map, routeRef.current);
+        }
+      }
+    });
+
+    let lastDblClickTime = 0;
+    map.on('dblclick', () => {
+      lastDblClickTime = Date.now();
+    });
+    
+    let lastGestureEndTime = 0;
+    map.on('zoomend', () => { lastGestureEndTime = Date.now(); });
+    map.on('dragend', () => { lastGestureEndTime = Date.now(); });
+
     // Detect user manual pan/zoom to suspend auto-centering
     map.on('dragstart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
     map.on('rotatestart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
@@ -233,6 +252,10 @@ export const MapView: React.FC<Props> = ({
       // Prevent double tap from placing a pin
       const originalEvent = e.originalEvent as MouseEvent;
       if (originalEvent && originalEvent.detail > 1) return;
+      
+      // Prevent synthetic clicks that fire right after a double tap gesture
+      if (Date.now() - lastDblClickTime < 500) return;
+      if (Date.now() - lastGestureEndTime < 300) return;
 
       if (hasDestinationRef.current) {
         onMapTapWithDestinationRef.current?.();
@@ -256,11 +279,6 @@ export const MapView: React.FC<Props> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
     map.setStyle(MAP_STYLES[mapStyle] as any);
-    
-    // Ensure route is re-applied after style is loaded
-    map.once('style.load', () => {
-      updateRouteLayer(map, routeRef.current);
-    });
   }, [mapStyle]);
 
   // 3. Update route on map when route state changes
@@ -355,7 +373,7 @@ export const MapView: React.FC<Props> = ({
 
     if (!destMarkerRef.current) {
       const el = document.createElement('div');
-      el.className = 'destination-marker cursor-grab active:cursor-grabbing transition-transform hover:scale-110';
+      el.className = 'destination-marker cursor-grab active:cursor-grabbing transition-transform hover:scale-110 origin-bottom';
       el.style.width = '32px';
       el.style.height = '42px';
 
@@ -409,7 +427,7 @@ export const MapView: React.FC<Props> = ({
       zoom: standardNavZoom,
       bearing: bearingToUse,
       pitch: 45,
-      padding: { top: 0, bottom: window.innerHeight * 0.4, left: 0, right: 0 },
+      padding: { top: window.innerHeight * 0.4, bottom: 0, left: 0, right: 0 },
       duration: 950,
       easing: (t) => t,
     });
@@ -433,7 +451,7 @@ export const MapView: React.FC<Props> = ({
       zoom: isNavigating ? standardNavZoom : 16,
       bearing: isNavigating ? bearing : 0,
       pitch: isNavigating ? 45 : 0,
-      padding: isNavigating ? { top: 0, bottom: window.innerHeight * 0.4, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 },
+      padding: isNavigating ? { top: window.innerHeight * 0.4, bottom: 0, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 },
       duration: 800,
     });
   }, [recenterTrigger]);

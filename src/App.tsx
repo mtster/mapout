@@ -603,7 +603,7 @@ export default function App() {
   };
 
   return (
-    <main className="fixed inset-0 w-full h-full overflow-hidden bg-black text-white select-none">
+    <main className="fixed inset-0 w-full h-[100dvh] overflow-hidden bg-black text-white select-none">
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
@@ -664,6 +664,8 @@ export default function App() {
         onResetNorth={handleResetNorth}
         isNavigating={isNavigating}
         bearing={bearing}
+        hasActiveDestination={!!route && !isNavigating}
+        isRouteSheetCollapsed={isRouteSheetCollapsed}
       />
 
       {/* Native Route Bottom Sheet */}

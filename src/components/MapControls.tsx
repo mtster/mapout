@@ -20,6 +20,8 @@ interface Props {
   onResetNorth: () => void;
   isNavigating: boolean;
   bearing?: number;
+  hasActiveDestination?: boolean;
+  isRouteSheetCollapsed?: boolean;
 }
 
 export const MapControls: React.FC<Props> = ({
@@ -33,6 +35,8 @@ export const MapControls: React.FC<Props> = ({
   onResetNorth,
   isNavigating,
   bearing = 0,
+  hasActiveDestination = false,
+  isRouteSheetCollapsed = false,
 }) => {
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const layerMenuRef = useRef<HTMLDivElement>(null);
@@ -58,8 +62,15 @@ export const MapControls: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed right-3 sm:right-6 bottom-20 z-[1200] flex flex-col gap-2.5 pointer-events-auto"
-      style={{ bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 20px)' }}
+      className="fixed right-3 sm:right-6 bottom-20 z-[1200] flex flex-col gap-2.5 pointer-events-auto transition-transform duration-300 ease-out"
+      style={{ 
+        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 20px)',
+        transform: hasActiveDestination
+          ? isRouteSheetCollapsed
+            ? 'translateY(calc(-90px - max(env(safe-area-inset-bottom, 0px), 16px)))'
+            : 'translateY(calc(-280px - max(env(safe-area-inset-bottom, 0px), 16px)))'
+          : 'translateY(0)',
+      }}
     >
       {/* Compass / Reset North - Button is functional, rotates needle towards True North, and tapping resets rotation to 0 */}
       <button
@@ -149,22 +160,24 @@ export const MapControls: React.FC<Props> = ({
       </button>
 
       {/* Zoom in & Zoom out */}
-      <div className="flex flex-col rounded-2xl bg-zinc-950/85 border border-white/10 backdrop-blur-2xl shadow-xl overflow-hidden divide-y divide-zinc-900">
-        <button
-          onClick={onZoomIn}
-          className="w-11 h-10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-900 active:scale-90 transition"
-          title="Zoom In"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onZoomOut}
-          className="w-11 h-10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-900 active:scale-90 transition"
-          title="Zoom Out"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-      </div>
+      {!hasActiveDestination && (
+        <div className="flex flex-col rounded-2xl bg-zinc-950/85 border border-white/10 backdrop-blur-2xl shadow-xl overflow-hidden divide-y divide-zinc-900">
+          <button
+            onClick={onZoomIn}
+            className="w-11 h-10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-900 active:scale-90 transition"
+            title="Zoom In"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onZoomOut}
+            className="w-11 h-10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-900 active:scale-90 transition"
+            title="Zoom Out"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
