@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Map as MapLibreMap } from 'maplibre-gl';
 import { LatLng, PlaceResult, RouteData, TravelMode, UserLocation } from '../types';
 import { calculateRoute, reverseGeocode } from '../services/mapService';
@@ -44,6 +44,7 @@ export function useRoutePlanner({
 
   // Request counter to avoid race conditions with out-of-order responses
   const routeRequestIdRef = useRef(0);
+  const hasInitializedPresetRef = useRef(false);
 
   // Calculate route when destination or travel mode changes
   const fetchRoute = useCallback(
@@ -108,23 +109,58 @@ export function useRoutePlanner({
     [userLocation, mapInstance, setUserLocation]
   );
 
-  // User selects a place from Search
+  // Check URL params for preset shared destination pin on initial mount
+  useEffect(() => {
+    if (hasInitializedPresetRef.current || typeof window === 'undefined') return;
+    hasInitializedPresetRef.current = true;
+
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const dlatStr = urlParams.get('dlat') || urlParams.get('lat');
+      const dlngStr = urlParams.get('dlng') || urlParams.get('lng');
+      const nameStr = urlParams.get('name') || urlParams.get('dname');
+      const modeStr = urlParams.get('mode') as TravelMode | null;
+
+      if (dlatStr && dlngStr) {
+        const lat = parseFloat(dlatStr);
+        const lng = parseFloat(dlngStr);
+        if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          const placeName = nameStr ? decodeURIComponent(nameStr) : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+          const place: PlaceResult = {
+            id: `shared-${Date.now()}`,
+            name: placeName,
+            label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+            lat,
+            lng,
+          };
+
+          const activeMode =
+            modeStr === 'driving' || modeStr === 'cycling' || modeStr === 'walking'
+              ? modeStr
+              : travelMode;
+
+          if (activeMode !== travelMode) {
+            setTravelMode(activeMode);
+          }
+
+          setSelectedDestination(place);
+          setIsRouteSheetCollapsed(false);
+          fetchRoute([lat, lng], placeName, activeMode);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not parse shared preset route from URL:', err);
+    }
+  }, [fetchRoute, travelMode]);
+
+  // User selects a place from Search - Directly requests route without separate intermediate flyTo bounce
   const handleSelectPlace = useCallback(
     (place: PlaceResult) => {
       setSelectedDestination(place);
       setIsRouteSheetCollapsed(false);
-      if (mapInstance) {
-        const padBottom = Math.round((window.screen?.height || window.innerHeight) * 0.35);
-        mapInstance.flyTo({
-          center: [place.lng, place.lat],
-          zoom: 15,
-          duration: 1200,
-          padding: { top: 0, bottom: padBottom, left: 0, right: 0 },
-        });
-      }
       fetchRoute([place.lat, place.lng], place.name, travelMode);
     },
-    [mapInstance, fetchRoute, travelMode]
+    [fetchRoute, travelMode]
   );
 
   // User drops a pin by clicking on the map
@@ -158,7 +194,7 @@ export function useRoutePlanner({
   // Travel mode changed
   const handleChangeMode = useCallback(
     (mode: TravelMode) => {
-      if (mode === travelMode) return; // Prevent unnecessary refetch if already active
+      if (mode === travelMode) return;
       setTravelMode(mode);
       try {
         localStorage.setItem('mapout_travel_mode', mode);

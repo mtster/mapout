@@ -15,6 +15,7 @@ import {
   ArrowUp,
   Flag,
   Share2,
+  Check,
 } from 'lucide-react';
 import { RouteData, TravelMode } from '../types';
 import { formatDistance, formatDuration, formatETA } from '../services/mapService';
@@ -29,6 +30,7 @@ interface Props {
   isNavigating: boolean;
   isCollapsed: boolean;
   onToggleCollapse: (collapsed?: boolean) => void;
+  onHeightChange?: (height: number) => void;
 }
 
 export const RouteBottomSheet: React.FC<Props> = ({
@@ -41,8 +43,11 @@ export const RouteBottomSheet: React.FC<Props> = ({
   isNavigating,
   isCollapsed,
   onToggleCollapse,
+  onHeightChange,
 }) => {
   const [showSteps, setShowSteps] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   // Drag tracking state
   const dragStartYRef = useRef<number | null>(null);
@@ -53,6 +58,29 @@ export const RouteBottomSheet: React.FC<Props> = ({
   useEffect(() => {
     setShowSteps(false);
   }, [route?.destinationName, route?.geometry]);
+
+  // Track physical rendered height and notify parent (so MapControls follows smoothly)
+  useEffect(() => {
+    if (!sheetRef.current || !route || isNavigating) {
+      onHeightChange?.(0);
+      return;
+    }
+
+    const updateHeight = () => {
+      if (sheetRef.current) {
+        const rect = sheetRef.current.getBoundingClientRect();
+        onHeightChange?.(rect.height);
+      }
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(sheetRef.current);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [route, isNavigating, isCollapsed, showSteps, onHeightChange]);
 
   if (!route || isNavigating) return null;
 
@@ -67,22 +95,40 @@ export const RouteBottomSheet: React.FC<Props> = ({
 
   const handleShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Route to ${route.destinationName}`,
-          text: `Route to ${route.destinationName}: ${formatDistance(route.distance)}, ${formatDuration(route.duration)}`,
-          url: window.location.href,
-        });
-      } catch {
-        // Ignored or dismissed
+    try {
+      const url = new URL(window.location.origin + window.location.pathname);
+      url.searchParams.set('dlat', route.endPoint[0].toFixed(6));
+      url.searchParams.set('dlng', route.endPoint[1].toFixed(6));
+      url.searchParams.set('name', encodeURIComponent(route.destinationName));
+      url.searchParams.set('mode', travelMode);
+      const shareUrl = url.toString();
+
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        try {
+          await navigator.share({
+            title: `${route.destinationName} - Mapout`,
+            text: `Route to ${route.destinationName} (${formatDuration(route.duration)}, ${formatDistance(route.distance)})`,
+            url: shareUrl,
+          });
+          return;
+        } catch (err: any) {
+          if (err.name === 'AbortError') return;
+        }
       }
+
+      // Fallback: Copy preset link to clipboard
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2500);
+      }
+    } catch {
+      // Ignored
     }
   };
 
   // Touch and pointer drag gestures to pull down (close/collapse) or pull up (expand)
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Only drag from primary button / touch
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     dragStartYRef.current = e.clientY;
     isDraggingRef.current = true;
@@ -92,10 +138,8 @@ export const RouteBottomSheet: React.FC<Props> = ({
     if (!isDraggingRef.current || dragStartYRef.current === null) return;
     const dy = e.clientY - dragStartYRef.current;
     if (isCollapsed) {
-      // When collapsed, only allow dragging up (dy < 0)
       setDragOffset(Math.min(0, Math.max(-180, dy)));
     } else {
-      // When expanded, only allow dragging down (dy > 0)
       setDragOffset(Math.max(0, Math.min(220, dy)));
     }
   };
@@ -105,12 +149,10 @@ export const RouteBottomSheet: React.FC<Props> = ({
     isDraggingRef.current = false;
 
     if (isCollapsed) {
-      // Dragged up enough to expand
       if (dragOffset < -30) {
         onToggleCollapse(false);
       }
     } else {
-      // Dragged down enough to collapse
       if (dragOffset > 35) {
         onToggleCollapse(true);
       }
@@ -119,20 +161,15 @@ export const RouteBottomSheet: React.FC<Props> = ({
     dragStartYRef.current = null;
   };
 
-  const getModeIcon = () => {
-    if (travelMode === 'cycling') return <Bike className="w-3.5 h-3.5" />;
-    if (travelMode === 'walking') return <Footprints className="w-3.5 h-3.5" />;
-    return <Car className="w-3.5 h-3.5" />;
-  };
-
   return (
     <div
+      ref={sheetRef}
       id="route-bottom-sheet"
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       className={`fixed left-0 right-0 sm:left-6 sm:bottom-4 sm:max-w-md sm:rounded-3xl rounded-t-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.85)] z-[1200] text-white overflow-hidden pointer-events-auto select-none ${
-        isDraggingRef.current ? '' : 'transition-all duration-300 ease-out'
+        isDraggingRef.current ? '' : 'transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]'
       }`}
       style={{
         bottom: 0,
@@ -182,13 +219,18 @@ export const RouteBottomSheet: React.FC<Props> = ({
           >
             {isCollapsed ? <ChevronUp className="w-4 h-4 text-sky-400" /> : <ChevronDown className="w-4 h-4" />}
           </button>
-          {!isCollapsed && typeof navigator !== 'undefined' && 'share' in navigator && (
+          {!isCollapsed && (
             <button
               onClick={handleShare}
-              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-              title="Share route"
+              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95 relative"
+              title="Share route link"
             >
-              <Share2 className="w-4 h-4" />
+              {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
+              {isCopied && (
+                <span className="absolute -top-7 right-0 text-[10px] bg-emerald-500 text-black font-bold px-1.5 py-0.5 rounded shadow">
+                  Copied!
+                </span>
+              )}
             </button>
           )}
           <button
@@ -201,14 +243,14 @@ export const RouteBottomSheet: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Fluid Expandable Section (Hardware-accelerated CSS Grid transition - 0 battery drain) */}
+      {/* Fluid Expandable Section */}
       <div
         className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
           isCollapsed ? 'grid-rows-[0fr] opacity-0 pointer-events-none' : 'grid-rows-[1fr] opacity-100'
         }`}
       >
         <div className="overflow-hidden px-5 pt-2 pb-2">
-          {/* Travel Mode Pills - Permanently mounted so switching vehicle modes has zero twitching */}
+          {/* Travel Mode Pills */}
           <div className="grid grid-cols-3 gap-2 p-1 rounded-2xl bg-zinc-900/90 border border-white/5 mb-3">
             <button
               onClick={() => {
@@ -251,7 +293,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Route Metrics Row - Fixed height area; when vehicle changes, stays empty with no text or spinner until new data arrives */}
+          {/* Route Metrics Row */}
           <div className="min-h-[48px] flex items-center justify-between py-1 border-b border-zinc-900">
             {isLoadingRoute ? null : (
               <>
@@ -299,7 +341,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Turn-by-Turn Steps Bar: Separated by exact uniform 12px from Start Navigation */}
+          {/* Turn-by-Turn Steps Bar */}
           <div className="mt-3">
             <button
               onClick={() => setShowSteps(!showSteps)}
@@ -312,24 +354,32 @@ export const RouteBottomSheet: React.FC<Props> = ({
               {!isLoadingRoute && (showSteps ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />)}
             </button>
 
-            {/* Steps dropdown content: Separated by exact uniform 12px from Turn-by-Turn bar */}
-            {showSteps && !isLoadingRoute && (
-              <div className="mt-3 max-h-56 overflow-y-auto rounded-2xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-900/80">
-                {route.steps.map((step, idx) => (
-                  <div key={step.id || idx} className="flex items-start gap-3 p-3 text-xs">
-                    <div className="p-1.5 rounded-lg bg-zinc-800 mt-0.5 shrink-0">
-                      {getManeuverIcon(step.modifier, step.type)}
+            {/* Fluid Turn-by-Turn Dropdown with CSS Grid animated transition */}
+            <div
+              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                showSteps && !isLoadingRoute
+                  ? 'grid-rows-[1fr] opacity-100 mt-2.5'
+                  : 'grid-rows-[0fr] opacity-0 pointer-events-none mt-0'
+              }`}
+            >
+              <div className="overflow-hidden">
+                <div className="max-h-52 overflow-y-auto scrollable-content rounded-2xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-900/80 p-1">
+                  {route.steps.map((step, idx) => (
+                    <div key={step.id || idx} className="flex items-start gap-3 p-3 text-xs">
+                      <div className="p-1.5 rounded-lg bg-zinc-800 mt-0.5 shrink-0">
+                        {getManeuverIcon(step.modifier, step.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-zinc-200 font-medium leading-snug">{step.instruction}</p>
+                        {step.distance > 0 && (
+                          <p className="text-[11px] text-zinc-500 mt-0.5">{formatDistance(step.distance)}</p>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-zinc-200 font-medium leading-snug">{step.instruction}</p>
-                      {step.distance > 0 && (
-                        <p className="text-[11px] text-zinc-500 mt-0.5">{formatDistance(step.distance)}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>

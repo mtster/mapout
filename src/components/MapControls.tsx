@@ -22,7 +22,7 @@ interface Props {
   isNavigating: boolean;
   bearing?: number;
   hasActiveDestination?: boolean;
-  isRouteSheetCollapsed?: boolean;
+  bottomSheetHeight?: number;
 }
 
 export const MapControls: React.FC<Props> = ({
@@ -38,7 +38,7 @@ export const MapControls: React.FC<Props> = ({
   isNavigating,
   bearing = 0,
   hasActiveDestination = false,
-  isRouteSheetCollapsed = false,
+  bottomSheetHeight = 0,
 }) => {
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const layerMenuRef = useRef<HTMLDivElement>(null);
@@ -62,19 +62,20 @@ export const MapControls: React.FC<Props> = ({
 
   const isRotated = Math.abs(bearing % 360) > 1;
 
+  // Compute dynamic transform: directly track bottom sheet height with snug 10px spacing
+  const yOffset = hasActiveDestination && bottomSheetHeight > 0
+    ? `calc(-${bottomSheetHeight}px + 8px)`
+    : '0px';
+
   return (
     <div
-      className="fixed right-3 sm:right-6 bottom-20 z-[1200] flex flex-col gap-2.5 pointer-events-auto transition-transform duration-300 ease-out"
-      style={{ 
-        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 20px)',
-        transform: hasActiveDestination
-          ? isRouteSheetCollapsed
-            ? 'translateY(calc(-90px - max(env(safe-area-inset-bottom, 0px), 16px)))'
-            : 'translateY(calc(-280px - max(env(safe-area-inset-bottom, 0px), 16px)))'
-          : 'translateY(0)',
+      className="fixed right-3 sm:right-6 z-[1200] flex flex-col gap-2 pointer-events-auto transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+      style={{
+        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 8px)',
+        transform: `translate3d(0, ${yOffset}, 0)`,
       }}
     >
-      {/* Compass / Reset North - Button is functional, rotates needle towards True North, and tapping resets rotation to 0 */}
+      {/* Compass / Reset North */}
       <button
         onClick={onResetNorth}
         id="compass-reset-north-btn"

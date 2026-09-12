@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Map as MapLibreMap } from 'maplibre-gl';
 import { MapStyle, TravelMode } from './types';
 import { MapView } from './components/MapView';
@@ -22,6 +22,25 @@ const STANDARD_NAV_ZOOM: Record<TravelMode, number> = {
 export default function App() {
   const [mapInstance, setMapInstance] = useState<MapLibreMap | null>(null);
   const [mapStyle, setMapStyle] = useState<MapStyle>('dark');
+  const [sheetHeight, setSheetHeight] = useState(0);
+
+  // Prevent browser window bouncing on pull gestures
+  useEffect(() => {
+    const handleTouchMove = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const isScrollable = target.closest('.scrollable-content');
+      const isMap = target.closest('#map-container') || target.closest('.maplibregl-canvas');
+      if (!isScrollable && !isMap && e.cancelable) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    return () => {
+      document.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
 
   // 1. Continuous User GPS Location & Geolocation state
   const {
@@ -110,7 +129,7 @@ export default function App() {
   }, [mapInstance, setBearing]);
 
   return (
-    <main id="main-view" className="absolute inset-0 w-full h-full overflow-visible bg-black text-white select-none">
+    <main id="main-view" className="absolute inset-0 w-full h-full overflow-hidden bg-black text-white select-none touch-none">
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
@@ -177,7 +196,7 @@ export default function App() {
         isNavigating={isNavigating}
         bearing={bearing}
         hasActiveDestination={!!route && !isNavigating}
-        isRouteSheetCollapsed={isRouteSheetCollapsed}
+        bottomSheetHeight={route ? sheetHeight : 0}
       />
 
       {/* Native Route Bottom Sheet */}
@@ -193,6 +212,7 @@ export default function App() {
         onToggleCollapse={(collapsed) =>
           setIsRouteSheetCollapsed(typeof collapsed === 'boolean' ? collapsed : !isRouteSheetCollapsed)
         }
+        onHeightChange={setSheetHeight}
       />
 
       {/* Active Turn-by-Turn Navigation HUD */}

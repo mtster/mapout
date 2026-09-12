@@ -1,14 +1,14 @@
 import { Map as MapLibreMap, LngLatBounds } from 'maplibre-gl';
-import { LatLng, RouteData, UserLocation } from '../../types';
+import { LatLng, RouteData } from '../../types';
 import { smoothAngle } from '../../services/turfMathService';
 
 /**
- * Frames the route within the visible viewport above the route bottom sheet
+ * Frames the route within the visible viewport above the route bottom sheet in a single smooth motion
  */
 export function fitRouteBounds(
   map: MapLibreMap,
   route: RouteData,
-  isRouteSheetCollapsed: boolean
+  isRouteSheetCollapsed = false
 ) {
   if (!route.geometry || route.geometry.length < 2) return;
 
@@ -49,16 +49,19 @@ export function fitRouteBounds(
   else if (maxSpan > 0.5) safeMinZoom = 9;
   else if (maxSpan > 0.1) safeMinZoom = 11;
 
+  // Single fluid motion: directly fly / ease without bouncing
   map.fitBounds(bounds, {
     padding: { top: topPadding, bottom: bottomPadding, left: sidePadding, right: sidePadding },
     maxZoom: 16.5,
     minZoom: safeMinZoom,
-    duration: 800,
+    duration: 850,
+    animate: true,
   });
 }
 
 /**
- * 60 FPS Follow Camera during active turn-by-turn navigation (45 deg Perspective)
+ * 60 FPS Follow Camera during active turn-by-turn navigation (45-50 deg Perspective)
+ * The location circle is positioned closer to the bottom HUD so more road & turns appear ahead on the map
  */
 export function followNavigationCamera(
   map: MapLibreMap,
@@ -72,12 +75,16 @@ export function followNavigationCamera(
     bearingToUse = smoothAngle(currentBearing, targetHeading, 0.45);
   }
 
+  // Set top padding so location dot sits close to the bottom navigation bar
+  const viewportHeight = window.innerHeight || 600;
+  const navTopPadding = Math.min(viewportHeight * 0.65, viewportHeight - 110);
+
   map.easeTo({
     center: [targetCoord[1], targetCoord[0]],
     zoom: standardNavZoom,
     bearing: bearingToUse,
-    pitch: 45,
-    padding: { top: window.innerHeight * 0.4, bottom: 0, left: 0, right: 0 },
+    pitch: 50,
+    padding: { top: navTopPadding, bottom: 0, left: 0, right: 0 },
     duration: 950,
     easing: (t) => t,
   });
@@ -96,13 +103,16 @@ export function recenterMapCamera(
   const bearing =
     typeof targetHeading === 'number' && !isNaN(targetHeading) ? targetHeading : 0;
 
+  const viewportHeight = window.innerHeight || 600;
+  const navTopPadding = Math.min(viewportHeight * 0.65, viewportHeight - 110);
+
   map.flyTo({
     center: [targetCoord[1], targetCoord[0]],
     zoom: isNavigating ? standardNavZoom : 16,
     bearing: isNavigating ? bearing : 0,
-    pitch: isNavigating ? 45 : 0,
+    pitch: isNavigating ? 50 : 0,
     padding: isNavigating
-      ? { top: window.innerHeight * 0.4, bottom: 0, left: 0, right: 0 }
+      ? { top: navTopPadding, bottom: 0, left: 0, right: 0 }
       : { top: 0, bottom: 0, left: 0, right: 0 },
     duration: 800,
   });

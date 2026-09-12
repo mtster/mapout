@@ -60,6 +60,7 @@ export const MapView: React.FC<Props> = ({
   routeRef.current = route;
 
   const isInitialMountRef = useRef(true);
+  const lastFramedDestKeyRef = useRef<string | null>(null);
 
   // Apply unconstrained physical dimensions on mobile viewport
   useExactViewport(mapContainerRef, mapInstanceRef);
@@ -257,16 +258,23 @@ export const MapView: React.FC<Props> = ({
     map.setStyle(MAP_STYLES[mapStyle] as any);
   }, [mapStyle]);
 
-  // 3. Update route on map and frame bounds
+  // 3. Update route on map and frame bounds ONLY when a new destination is selected
+  // (Prevents jarring camera bouncing when minimizing/maximizing sheet or changing vehicle types)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     updateRouteLayer(map, route);
 
     if (route && !isNavigating) {
-      fitRouteBounds(map, route, isRouteSheetCollapsed);
+      const destKey = `${route.destinationName}-${route.endPoint[0].toFixed(5)}-${route.endPoint[1].toFixed(5)}`;
+      if (lastFramedDestKeyRef.current !== destKey) {
+        lastFramedDestKeyRef.current = destKey;
+        fitRouteBounds(map, route, isRouteSheetCollapsed);
+      }
+    } else if (!route) {
+      lastFramedDestKeyRef.current = null;
     }
-  }, [route, isNavigating, isRouteSheetCollapsed]);
+  }, [route, isNavigating]);
 
   // 4. Render and update User Location marker
   useEffect(() => {
@@ -295,7 +303,7 @@ export const MapView: React.FC<Props> = ({
     );
   }, [destination, isNavigating]);
 
-  // 6. Navigation Follow Camera Engine (Fluid 60 FPS GPU-Accelerated 45 deg Perspective)
+  // 6. Navigation Follow Camera Engine (Fluid 60 FPS GPU-Accelerated Perspective)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !isNavigating || !isFollowingUser) return;
