@@ -26,11 +26,11 @@ interface Props {
 // 100% Free, Vector, Hardware-Accelerated Basemap Styles from OpenFreeMap
 // Zero API Keys, Zero Watermarks, Native 60 FPS WebGL Vector Rendering
 const MAP_STYLES: Record<MapStyle, string | object> = {
-  // Obsidian Dark: Native Dark Vector map from OpenFreeMap
-  dark: 'https://tiles.openfreemap.org/styles/dark',
+  // Darkness: Minimal dark map (removed POIs, pedestrians)
+  dark: '/style-darkness.json',
 
-  // Pure Midnight: High-contrast detailed vector map from OpenFreeMap
-  midnight: 'https://tiles.openfreemap.org/styles/dark',
+  // Night Life: Dark map with full features (shops, bus stops, etc)
+  midnight: '/style-nightlife.json',
 
   // Photorealistic Satellite: Esri High-Resolution World Imagery
   satellite: {
@@ -228,6 +228,12 @@ export const MapView: React.FC<Props> = ({
     // Click handler on map canvas
     map.on('click', (e) => {
       if (isNavigatingRef.current) return;
+      if (map.isMoving() || map.isZooming()) return;
+      
+      // Prevent double tap from placing a pin
+      const originalEvent = e.originalEvent as MouseEvent;
+      if (originalEvent && originalEvent.detail > 1) return;
+
       if (hasDestinationRef.current) {
         onMapTapWithDestinationRef.current?.();
       } else {
@@ -250,6 +256,11 @@ export const MapView: React.FC<Props> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
     map.setStyle(MAP_STYLES[mapStyle] as any);
+    
+    // Ensure route is re-applied after style is loaded
+    map.once('style.load', () => {
+      updateRouteLayer(map, routeRef.current);
+    });
   }, [mapStyle]);
 
   // 3. Update route on map when route state changes
@@ -349,14 +360,12 @@ export const MapView: React.FC<Props> = ({
       el.style.height = '42px';
 
       el.innerHTML = `
-        <div class="relative flex flex-col items-center">
-          <div class="w-8 h-8 rounded-full bg-rose-500 border-2 border-white shadow-[0_0_16px_rgba(244,63,94,0.9)] flex items-center justify-center text-white">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
+        <div class="relative flex flex-col items-center justify-center translate-y-1/4">
+          <div class="w-7 h-7 rounded-full bg-sky-500 border-[3px] border-black shadow-[0_0_20px_rgba(14,165,233,0.8)] flex items-center justify-center text-white relative z-10">
+            <div class="w-2.5 h-2.5 bg-white rounded-full"></div>
           </div>
-          <div class="w-2 h-2 rounded-full bg-rose-600 -mt-1 shadow-md"></div>
+          <div class="w-1 h-5 bg-sky-500 -mt-1 shadow-lg relative z-0"></div>
+          <div class="w-3 h-1 bg-black/60 rounded-full blur-[2px] mt-0.5"></div>
         </div>
       `;
 

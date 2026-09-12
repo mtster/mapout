@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Navigation,
   Compass,
@@ -35,6 +35,21 @@ export const MapControls: React.FC<Props> = ({
   bearing = 0,
 }) => {
   const [showLayerMenu, setShowLayerMenu] = useState(false);
+  const layerMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (layerMenuRef.current && !layerMenuRef.current.contains(event.target as Node)) {
+        setShowLayerMenu(false);
+      }
+    };
+    if (showLayerMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showLayerMenu]);
 
   // When actively navigating, some controls are simplified or moved
   if (isNavigating) return null;
@@ -66,7 +81,7 @@ export const MapControls: React.FC<Props> = ({
       </button>
 
       {/* Layer Switcher */}
-      <div className="relative">
+      <div className="relative" ref={layerMenuRef}>
         <button
           onClick={() => setShowLayerMenu(!showLayerMenu)}
           className={`w-11 h-11 rounded-2xl border backdrop-blur-2xl shadow-xl flex items-center justify-center transition active:scale-90 ${
@@ -89,8 +104,8 @@ export const MapControls: React.FC<Props> = ({
             </div>
             {(
               [
-                { id: 'dark', label: 'Obsidian Dark' },
-                { id: 'midnight', label: 'Pure Midnight' },
+                { id: 'dark', label: 'Darkness' },
+                { id: 'midnight', label: 'Night Life' },
                 { id: 'satellite', label: 'Satellite' },
               ] as const
             ).map((item) => (
