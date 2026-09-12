@@ -603,7 +603,7 @@ export default function App() {
   };
 
   return (
-    <main className="fixed inset-0 w-full h-full overflow-hidden bg-black text-white select-none">
+    <main id="main-view" className="fixed inset-0 w-full min-h-full overflow-hidden bg-black text-white select-none">
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
