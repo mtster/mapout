@@ -627,6 +627,17 @@ export default function App() {
         onBearingChange={setBearing}
       />
 
+      {/* Dummy white box below the map covering the gap between the bottom of the map and the bottom of the screen */}
+      <div
+        id="bottom-gap-white-box"
+        className="fixed bottom-0 left-0 right-0 w-full pointer-events-none z-10 bg-white"
+        style={{
+          height: 'max(env(safe-area-inset-bottom, 0px), 70px)',
+          bottom: 0,
+        }}
+        aria-hidden="true"
+      />
+
       {/* Top Search Bar (idle state) */}
       <SearchBar
         userLocation={userLocation ? [userLocation.lat, userLocation.lng] : null}
