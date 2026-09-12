@@ -76,6 +76,83 @@ export const MapView: React.FC<Props> = ({
   recenterTrigger,
   onBearingChange,
 }) => {
+  const [viewportDims, setViewportDims] = React.useState<{ width: number; height: number }>(() => {
+    const w = typeof window !== 'undefined' ? Math.max(window.innerWidth, window.screen?.width || 0) : 1000;
+    const h = typeof window !== 'undefined' ? Math.max(window.innerHeight, window.screen?.height || 0) : 1000;
+    return { width: w, height: h };
+  });
+
+  // Calculate exact physical height of the device in pixels and assign to map
+  useEffect(() => {
+    const updateExactDimensions = () => {
+      // Calculate true maximum screen bounds across screen, visualViewport, innerHeight, and documentElement
+      const trueHeight = Math.max(
+        window.innerHeight || 0,
+        window.screen?.height || 0,
+        window.screen?.availHeight || 0,
+        window.visualViewport?.height || 0,
+        document.documentElement?.clientHeight || 0,
+        document.documentElement?.scrollHeight || 0
+      );
+      const trueWidth = Math.max(
+        window.innerWidth || 0,
+        window.screen?.width || 0,
+        window.screen?.availWidth || 0,
+        window.visualViewport?.width || 0,
+        document.documentElement?.clientWidth || 0
+      );
+
+      if (trueHeight > 0 && trueWidth > 0) {
+        setViewportDims({ width: trueWidth, height: trueHeight });
+
+        // Update container directly in DOM for immediate paint
+        if (mapContainerRef.current) {
+          mapContainerRef.current.style.height = `${trueHeight}px`;
+          mapContainerRef.current.style.minHeight = `${trueHeight}px`;
+          mapContainerRef.current.style.width = `${trueWidth}px`;
+        }
+
+        // Also ensure html, body and root stretch to this physical pixel height
+        document.documentElement.style.height = `${trueHeight}px`;
+        document.body.style.height = `${trueHeight}px`;
+        const rootEl = document.getElementById('root');
+        if (rootEl) {
+          rootEl.style.height = `${trueHeight}px`;
+        }
+
+        // Trigger map canvas recomputation
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.resize();
+        }
+      }
+    };
+
+    updateExactDimensions();
+
+    window.addEventListener('resize', updateExactDimensions);
+    window.addEventListener('orientationchange', updateExactDimensions);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateExactDimensions);
+    }
+
+    // Also trigger on requestAnimationFrame and short timeouts to capture final iOS PWA layout passes
+    const rafId = requestAnimationFrame(updateExactDimensions);
+    const t1 = setTimeout(updateExactDimensions, 100);
+    const t2 = setTimeout(updateExactDimensions, 300);
+    const t3 = setTimeout(updateExactDimensions, 1000);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener('resize', updateExactDimensions);
+      window.removeEventListener('orientationchange', updateExactDimensions);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', updateExactDimensions);
+      }
+    };
+  }, []);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMap | null>(null);
   const userMarkerRef = useRef<Marker | null>(null);
@@ -486,15 +563,16 @@ export const MapView: React.FC<Props> = ({
     <div
       ref={mapContainerRef}
       id="map-container"
-      className="fixed inset-0 bg-black cursor-crosshair z-0 w-full h-full"
+      className="fixed inset-0 bg-black cursor-crosshair z-0"
       style={{
         position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        width: '100vw',
-        height: '100vh',
+        width: `${viewportDims.width}px`,
+        height: `${viewportDims.height}px`,
+        minHeight: `${viewportDims.height}px`,
       }}
     />
   );
