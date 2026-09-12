@@ -29,8 +29,8 @@ const MAP_STYLES: Record<MapStyle, string | object> = {
   // Obsidian Dark: Native Dark Vector map from OpenFreeMap
   dark: 'https://tiles.openfreemap.org/styles/dark',
 
-  // Pure Midnight: High-contrast detailed vector streets from OpenFreeMap
-  midnight: 'https://tiles.openfreemap.org/styles/liberty',
+  // Pure Midnight: High-contrast detailed vector map from OpenFreeMap
+  midnight: 'https://tiles.openfreemap.org/styles/dark',
 
   // Photorealistic Satellite: Esri High-Resolution World Imagery
   satellite: {
