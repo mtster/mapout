@@ -11,6 +11,8 @@
 html,
 body {
   width: 100% !important;
+  height: 100% !important;
+  height: -webkit-fill-available !important;
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
@@ -107,4 +109,17 @@ main {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Force MapLibre canvas to stretch full height */
+.maplibregl-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Let MapLibre handle its own canvas container */
+.maplibregl-canvas-container {
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: auto;
 }

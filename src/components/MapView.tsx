@@ -205,6 +205,8 @@ export const MapView: React.FC<Props> = ({
     mapInstanceRef.current = map;
 
     map.on('load', () => {
+      // Force MapLibre to calculate real container dimensions immediately
+      map.resize();
       onMapReady?.(map);
       updateRouteLayer(map, routeRef.current);
     });
@@ -264,7 +266,16 @@ export const MapView: React.FC<Props> = ({
       }
     });
 
+    // Observe parent container resize and update MapLibre canvas on mobile viewport shifts
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
+    });
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
