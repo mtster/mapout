@@ -291,7 +291,11 @@ export function formatDistance(meters: number): string {
 
 // Format duration: 18 min or 1 h 24 min
 export function formatDuration(seconds: number): string {
-  const mins = Math.round(seconds / 60);
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const mins = Math.round(safeSeconds / 60);
+  if (mins < 1) {
+    return '1 min';
+  }
   if (mins < 60) {
     return `${mins} min`;
   }
@@ -301,8 +305,11 @@ export function formatDuration(seconds: number): string {
 }
 
 // Format ETA timestamp in strict 24-hour format (e.g., "17:42", "09:15")
-export function formatETA(durationSeconds: number): string {
-  const arrival = new Date(Date.now() + durationSeconds * 1000);
+// If targetTimestampMs is given (locked at start of navigation), it formats that exact target timestamp
+// preventing ETA from drifting forward as time elapses.
+export function formatETA(durationSeconds: number, targetTimestampMs?: number | null): string {
+  const timestamp = targetTimestampMs || (Date.now() + Math.max(0, durationSeconds) * 1000);
+  const arrival = new Date(timestamp);
   const hours = String(arrival.getHours()).padStart(2, '0');
   const minutes = String(arrival.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
@@ -322,6 +329,50 @@ export function calculateHaversineDistance(p1: LatLng, p2: LatLng): number {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return Math.round(R * c);
+}
+
+// Project a point onto a line segment and calculate exact remaining distance along polyline to destination
+export function calculateRemainingDistanceAlongRoute(currentPos: LatLng, geometry: LatLng[]): number {
+  if (!geometry || geometry.length === 0) return 0;
+  if (geometry.length === 1) return calculateHaversineDistance(currentPos, geometry[0]);
+
+  let closestSegmentIndex = 0;
+  let minDistanceToSegment = Infinity;
+  let closestProjectedPoint: LatLng = geometry[0];
+
+  for (let i = 0; i < geometry.length - 1; i++) {
+    const a = geometry[i];
+    const b = geometry[i + 1];
+
+    const dx = b[1] - a[1];
+    const dy = b[0] - a[0];
+    const lenSq = dx * dx + dy * dy;
+
+    let t = 0;
+    if (lenSq > 0) {
+      t = ((currentPos[1] - a[1]) * dx + (currentPos[0] - a[0]) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+    }
+
+    const projected: LatLng = [a[0] + t * dy, a[1] + t * dx];
+    const dist = calculateHaversineDistance(currentPos, projected);
+
+    if (dist < minDistanceToSegment) {
+      minDistanceToSegment = dist;
+      closestSegmentIndex = i;
+      closestProjectedPoint = projected;
+    }
+  }
+
+  // Sum from current position to projected point + from projected point to segment end + remaining segments
+  let remaining = calculateHaversineDistance(currentPos, closestProjectedPoint);
+  remaining += calculateHaversineDistance(closestProjectedPoint, geometry[closestSegmentIndex + 1]);
+
+  for (let j = closestSegmentIndex + 1; j < geometry.length - 1; j++) {
+    remaining += calculateHaversineDistance(geometry[j], geometry[j + 1]);
+  }
+
+  return Math.round(remaining);
 }
 
 // Calculate bearing between two points in degrees (0 = North, 90 = East, 180 = South, 270 = West)

@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 /* System reset for pure native app feel, edge-to-edge rendering & zero bounce */
 :root {
@@ -40,7 +40,9 @@ main {
 
 /* Map container full bleed under safe areas & stacking isolation */
 #map-container,
-.leaflet-container {
+.maplibregl-map,
+.maplibregl-canvas-container,
+.maplibregl-canvas {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
@@ -57,18 +59,12 @@ main {
   background: #000000 !important;
   outline: none;
   z-index: 0 !important;
-  isolation: isolate;
-}
-
-/* Hide default leaflet controls since we have custom iOS-style controls */
-.leaflet-control-zoom {
-  display: none !important;
 }
 
 /* Minimalist dark attribution */
-.leaflet-control-attribution {
+.maplibregl-ctrl-attrib {
   background: rgba(0, 0, 0, 0.7) !important;
-  color: rgba(255, 255, 255, 0.3) !important;
+  color: rgba(255, 255, 255, 0.4) !important;
   font-size: 9px !important;
   padding: 2px 6px !important;
   border-radius: 6px !important;
@@ -77,35 +73,21 @@ main {
   z-index: 500 !important;
 }
 
-.leaflet-control-attribution a {
-  color: rgba(255, 255, 255, 0.4) !important;
+.maplibregl-ctrl-attrib a {
+  color: rgba(255, 255, 255, 0.5) !important;
   text-decoration: none !important;
 }
 
-/* Tile layer transition and GPU acceleration */
-.leaflet-tile {
-  -webkit-touch-callout: none !important;
-  -webkit-user-select: none !important;
-  user-select: none !important;
-  pointer-events: none !important;
-  transform: translate3d(0, 0, 0);
-  -webkit-transform: translate3d(0, 0, 0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
+/* Hide default MapLibre logo & zoom buttons since we have custom iOS-style controls */
+.maplibregl-ctrl-logo,
+.maplibregl-ctrl-bottom-left {
+  display: none !important;
 }
 
-.leaflet-tile-container {
+/* User Location Marker styling */
+.user-location-marker {
+  transition: transform 0.2s ease-out;
   will-change: transform;
-}
-
-/* Midnight style tile filter: transforms into pure black OLED navigation map */
-.tile-midnight .leaflet-tile {
-  filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(125%) saturate(20%) !important;
-}
-
-/* Satellite road labels contrast boost */
-.tile-reference .leaflet-tile {
-  filter: contrast(1.2) brightness(1.1);
 }
 
 /* Custom scrollbars */

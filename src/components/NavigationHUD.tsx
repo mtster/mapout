@@ -29,6 +29,7 @@ interface Props {
   showRecenter: boolean;
   isSimulated: boolean;
   onNextStep?: () => void;
+  targetArrivalTimestamp?: number | null;
 }
 
 export const NavigationHUD: React.FC<Props> = ({
@@ -44,6 +45,7 @@ export const NavigationHUD: React.FC<Props> = ({
   showRecenter,
   isSimulated,
   onNextStep,
+  targetArrivalTimestamp,
 }) => {
   const currentStep: RouteStep | undefined = route.steps[currentStepIndex] || route.steps[route.steps.length - 1];
   const nextStep: RouteStep | undefined = route.steps[currentStepIndex + 1];
@@ -165,7 +167,7 @@ export const NavigationHUD: React.FC<Props> = ({
                 <span>ETA</span>
               </div>
               <div className="text-xl font-extrabold text-white tracking-tight">
-                {formatETA(remainingDuration)}
+                {formatETA(remainingDuration, targetArrivalTimestamp)}
               </div>
             </div>
 
