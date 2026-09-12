@@ -627,17 +627,6 @@ export default function App() {
         onBearingChange={setBearing}
       />
 
-      {/* Hardware overhang white box: Starts exactly at bottom of layout container (top: 100%) and extends down into the hardware gap */}
-      <div
-        id="bottom-gap-white-box"
-        className="absolute left-0 right-0 w-full pointer-events-none z-10 bg-white"
-        style={{
-          top: '100%',
-          height: '120px',
-        }}
-        aria-hidden="true"
-      />
-
       {/* Top Search Bar (idle state) */}
       <SearchBar
         userLocation={userLocation ? [userLocation.lat, userLocation.lng] : null}

@@ -88,27 +88,41 @@ main {
   pointer-events: auto !important;
 }
 
-/* Minimalist dark attribution */
-.maplibregl-ctrl-attrib {
-  background: rgba(0, 0, 0, 0.7) !important;
-  color: rgba(255, 255, 255, 0.4) !important;
-  font-size: 9px !important;
-  padding: 2px 6px !important;
-  border-radius: 6px !important;
-  margin: 0 4px max(env(safe-area-inset-bottom, 0px), 8px) 0 !important;
-  backdrop-filter: blur(8px);
+/* MapLibre controls positioning & styling */
+.maplibregl-ctrl-bottom-right {
+  display: none !important;
+}
+
+.maplibregl-ctrl-bottom-left {
+  display: flex !important;
+  position: absolute !important;
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), 8px) + 4px) !important;
+  left: 8px !important;
+  margin: 0 !important;
   z-index: 500 !important;
   pointer-events: auto !important;
 }
 
+/* Minimalist dark attribution */
+.maplibregl-ctrl-attrib {
+  background: rgba(0, 0, 0, 0.75) !important;
+  color: rgba(255, 255, 255, 0.45) !important;
+  font-size: 10px !important;
+  padding: 3px 8px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  margin: 0 !important;
+  backdrop-filter: blur(8px);
+  pointer-events: auto !important;
+}
+
 .maplibregl-ctrl-attrib a {
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: rgba(255, 255, 255, 0.55) !important;
   text-decoration: none !important;
 }
 
 /* Hide default MapLibre logo & zoom buttons since we have custom iOS-style controls */
-.maplibregl-ctrl-logo,
-.maplibregl-ctrl-bottom-left {
+.maplibregl-ctrl-logo {
   display: none !important;
 }
 

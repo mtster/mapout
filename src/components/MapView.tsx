@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Map as MapLibreMap, Marker, LngLatBounds, GeoJSONSource } from 'maplibre-gl';
+import { Map as MapLibreMap, Marker, LngLatBounds, GeoJSONSource, AttributionControl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LatLng, MapStyle, RouteData, UserLocation } from '../types';
 import { smoothAngle } from '../services/mapService';
@@ -58,10 +58,6 @@ const MAP_STYLES: Record<MapStyle, string | object> = {
   },
 };
 
-// Exact physical logical screen dimensions for iPhone 15 Pro Max (430x932 CSS pixels @ 3x = 1290x2796 physical pixels)
-const IPHONE_15_PRO_MAX_HEIGHT = 932;
-const IPHONE_15_PRO_MAX_WIDTH = 430;
-
 export const MapView: React.FC<Props> = ({
   userLocation,
   destination,
@@ -80,127 +76,40 @@ export const MapView: React.FC<Props> = ({
   recenterTrigger,
   onBearingChange,
 }) => {
-  // Compute true height, ensuring it is AT LEAST 932px (iPhone 15 Pro Max height) on iOS/mobile
-  const [viewportDims, setViewportDims] = React.useState<{ width: number; height: number }>(() => {
-    const isIOSDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const measuredW = typeof window !== 'undefined' ? Math.max(window.innerWidth, window.screen?.width || 0) : 430;
-    const measuredH = typeof window !== 'undefined' ? Math.max(window.innerHeight, window.screen?.height || 0) : 932;
-    
-    // For iPhone 15 Pro Max testing, guarantee exact 932px height minimum
-    const h = isIOSDevice || measuredH >= 850 ? Math.max(measuredH, IPHONE_15_PRO_MAX_HEIGHT) : measuredH;
-    const w = isIOSDevice || measuredW >= 400 ? Math.max(measuredW, IPHONE_15_PRO_MAX_WIDTH) : measuredW;
-    return { width: w, height: h };
-  });
-
-  // Calculate and apply exact physical height of the device in pixels to the map
-  useEffect(() => {
-    const applyExactDimensions = () => {
-      const isIOSDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
-      
-      const screenH = window.screen?.height || 0;
-      const screenW = window.screen?.width || 0;
-      const innerH = window.innerHeight || 0;
-      const innerW = window.innerWidth || 0;
-      const vvH = window.visualViewport?.height || 0;
-      const vvW = window.visualViewport?.width || 0;
-      const docH = document.documentElement?.clientHeight || 0;
-
-      // Calculate max measured dimension
-      let targetHeight = Math.max(screenH, innerH, vvH, docH);
-      let targetWidth = Math.max(screenW, innerW, vvW, document.documentElement?.clientWidth || 0);
-
-      // On iPhone or any high-resolution device matching 15 Pro Max, hardcode exact 932px minimum
-      if (isIOSDevice || targetHeight >= 850 || screenH === 932 || screenH === 852) {
-        targetHeight = Math.max(targetHeight, IPHONE_15_PRO_MAX_HEIGHT);
-        targetWidth = Math.max(targetWidth, IPHONE_15_PRO_MAX_WIDTH);
-      }
-
-      // Default fallback
-      if (targetHeight < 500) targetHeight = IPHONE_15_PRO_MAX_HEIGHT;
-      if (targetWidth < 300) targetWidth = IPHONE_15_PRO_MAX_WIDTH;
-
-      setViewportDims({ width: targetWidth, height: targetHeight });
-
-      // Physically force the map container element
-      const container = mapContainerRef.current;
-      if (container) {
-        container.style.setProperty('height', `${targetHeight}px`, 'important');
-        container.style.setProperty('min-height', `${targetHeight}px`, 'important');
-        container.style.setProperty('width', `${targetWidth}px`, 'important');
-        container.style.setProperty('min-width', `${targetWidth}px`, 'important');
-      }
-
-      // Physically force the map canvas and its container
-      if (container) {
-        const canvasContainer = container.querySelector('.maplibregl-canvas-container') as HTMLElement | null;
-        const canvas = container.querySelector('.maplibregl-canvas') as HTMLElement | null;
-        if (canvasContainer) {
-          canvasContainer.style.setProperty('height', `${targetHeight}px`, 'important');
-          canvasContainer.style.setProperty('width', `${targetWidth}px`, 'important');
-        }
-        if (canvas) {
-          canvas.style.setProperty('height', `${targetHeight}px`, 'important');
-          canvas.style.setProperty('width', `${targetWidth}px`, 'important');
-        }
-      }
-
-      // Also force document body and root
-      document.documentElement.style.setProperty('height', `${targetHeight}px`, 'important');
-      document.documentElement.style.setProperty('min-height', `${targetHeight}px`, 'important');
-      document.body.style.setProperty('height', `${targetHeight}px`, 'important');
-      document.body.style.setProperty('min-height', `${targetHeight}px`, 'important');
-
-      const rootEl = document.getElementById('root');
-      if (rootEl) {
-        rootEl.style.setProperty('height', `${targetHeight}px`, 'important');
-        rootEl.style.setProperty('min-height', `${targetHeight}px`, 'important');
-      }
-
-      const mainEl = document.getElementById('main-view');
-      if (mainEl) {
-        mainEl.style.setProperty('height', `${targetHeight}px`, 'important');
-        mainEl.style.setProperty('min-height', `${targetHeight}px`, 'important');
-      }
-
-      // Trigger map resize
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.resize();
-      }
-    };
-
-    applyExactDimensions();
-
-    window.addEventListener('resize', applyExactDimensions);
-    window.addEventListener('orientationchange', applyExactDimensions);
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', applyExactDimensions);
-    }
-
-    const t1 = setTimeout(applyExactDimensions, 50);
-    const t2 = setTimeout(applyExactDimensions, 150);
-    const t3 = setTimeout(applyExactDimensions, 300);
-    const t4 = setTimeout(applyExactDimensions, 600);
-    const t5 = setTimeout(applyExactDimensions, 1200);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-      clearTimeout(t5);
-      window.removeEventListener('resize', applyExactDimensions);
-      window.removeEventListener('orientationchange', applyExactDimensions);
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', applyExactDimensions);
-      }
-    };
-  }, []);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<MapLibreMap | null>(null);
   const userMarkerRef = useRef<Marker | null>(null);
   const destMarkerRef = useRef<Marker | null>(null);
   const routeRef = useRef<RouteData | null>(route);
   routeRef.current = route;
+
+  // Keep map properly resized on any viewport/window dimension shifts
+  useEffect(() => {
+    const handleViewportChange = () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.resize();
+      }
+    };
+
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportChange);
+    }
+
+    const t1 = setTimeout(handleViewportChange, 100);
+    const t2 = setTimeout(handleViewportChange, 500);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('orientationchange', handleViewportChange);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleViewportChange);
+      }
+    };
+  }, []);
 
   // Fresh mutable refs
   const isNavigatingRef = useRef(isNavigating);
@@ -316,10 +225,10 @@ export const MapView: React.FC<Props> = ({
       touchPitch: true,
       touchZoomRotate: true,
       trackResize: true,
-      attributionControl: {
-        compact: true,
-      },
+      attributionControl: false,
     });
+
+    map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
 
     mapInstanceRef.current = map;
 
@@ -435,8 +344,16 @@ export const MapView: React.FC<Props> = ({
     if (route && route.geometry && route.geometry.length > 1 && !isNavigating) {
       const bounds = new LngLatBounds();
       route.geometry.forEach((pt) => bounds.extend([pt[1], pt[0]]));
+      
+      // Calculate responsive percentage-based padding so route is clearly framed above the bottom sheet
+      const screenH = typeof window !== 'undefined' ? window.innerHeight : 800;
+      const screenW = typeof window !== 'undefined' ? window.innerWidth : 400;
+      const topPadding = Math.max(90, Math.round(screenH * 0.12));
+      const bottomPadding = Math.max(280, Math.round(screenH * 0.42));
+      const sidePadding = Math.max(30, Math.round(screenW * 0.08));
+
       map.fitBounds(bounds, {
-        padding: { top: 80, bottom: 220, left: 40, right: 40 },
+        padding: { top: topPadding, bottom: bottomPadding, left: sidePadding, right: sidePadding },
         maxZoom: 16,
         duration: 1000,
       });
