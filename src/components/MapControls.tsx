@@ -80,11 +80,11 @@ export const MapControls: React.FC<Props> = ({
   let yOffset = '0px';
   if (hasActiveDestination) {
     if (isRouteSheetCollapsed) {
-      yOffset = 'calc(-78px - max(env(safe-area-inset-bottom, 0px), 16px) + 8px)';
+      yOffset = '-86px'; // -(78px + 8px)
     } else if (isStepsOpen) {
-      yOffset = 'calc(-466px - max(env(safe-area-inset-bottom, 0px), 16px) + 8px)';
+      yOffset = '-474px'; // -(466px + 8px)
     } else {
-      yOffset = 'calc(-248px - max(env(safe-area-inset-bottom, 0px), 16px) + 8px)';
+      yOffset = '-256px'; // -(248px + 8px)
     }
   }
 
