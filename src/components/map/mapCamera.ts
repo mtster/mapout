@@ -61,7 +61,7 @@ export function fitRouteBounds(
 
 /**
  * 60 FPS Follow Camera during active turn-by-turn navigation (45-50 deg Perspective)
- * The location circle is positioned closer to the bottom HUD so more road & turns appear ahead on the map
+ * The location circle sits at a balanced ~52% vertical offset, leaving ample forward road visibility
  */
 export function followNavigationCamera(
   map: MapLibreMap,
@@ -75,15 +75,15 @@ export function followNavigationCamera(
     bearingToUse = smoothAngle(currentBearing, targetHeading, 0.45);
   }
 
-  // Set top padding so location dot sits close to the bottom navigation bar
+  // Balanced positioning: ~52% from top, ~48% from bottom
   const viewportHeight = window.innerHeight || 600;
-  const navTopPadding = Math.min(viewportHeight * 0.65, viewportHeight - 110);
+  const navTopPadding = Math.min(viewportHeight * 0.52, viewportHeight - 150);
 
   map.easeTo({
     center: [targetCoord[1], targetCoord[0]],
     zoom: standardNavZoom,
     bearing: bearingToUse,
-    pitch: 50,
+    pitch: 48,
     padding: { top: navTopPadding, bottom: 0, left: 0, right: 0 },
     duration: 950,
     easing: (t) => t,
@@ -104,13 +104,13 @@ export function recenterMapCamera(
     typeof targetHeading === 'number' && !isNaN(targetHeading) ? targetHeading : 0;
 
   const viewportHeight = window.innerHeight || 600;
-  const navTopPadding = Math.min(viewportHeight * 0.65, viewportHeight - 110);
+  const navTopPadding = Math.min(viewportHeight * 0.52, viewportHeight - 150);
 
   map.flyTo({
     center: [targetCoord[1], targetCoord[0]],
     zoom: isNavigating ? standardNavZoom : 16,
     bearing: isNavigating ? bearing : 0,
-    pitch: isNavigating ? 50 : 0,
+    pitch: isNavigating ? 48 : 0,
     padding: isNavigating
       ? { top: navTopPadding, bottom: 0, left: 0, right: 0 }
       : { top: 0, bottom: 0, left: 0, right: 0 },

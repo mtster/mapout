@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Car,
   Bike,
@@ -30,7 +30,8 @@ interface Props {
   isNavigating: boolean;
   isCollapsed: boolean;
   onToggleCollapse: (collapsed?: boolean) => void;
-  onHeightChange?: (height: number) => void;
+  isStepsOpen: boolean;
+  onToggleSteps: (open?: boolean) => void;
 }
 
 export const RouteBottomSheet: React.FC<Props> = ({
@@ -43,44 +44,20 @@ export const RouteBottomSheet: React.FC<Props> = ({
   isNavigating,
   isCollapsed,
   onToggleCollapse,
-  onHeightChange,
+  isStepsOpen,
+  onToggleSteps,
 }) => {
-  const [showSteps, setShowSteps] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const sheetRef = useRef<HTMLDivElement>(null);
+  const [isCopied, setIsCopied] = React.useState(false);
 
   // Drag tracking state
   const dragStartYRef = useRef<number | null>(null);
-  const [dragOffset, setDragOffset] = useState(0);
+  const [dragOffset, setDragOffset] = React.useState(0);
   const isDraggingRef = useRef(false);
 
-  // Reset dropdown state whenever a new pin or destination is selected
+  // Reset dropdown state whenever destination changes
   useEffect(() => {
-    setShowSteps(false);
-  }, [route?.destinationName, route?.geometry]);
-
-  // Track physical rendered height and notify parent (so MapControls follows smoothly)
-  useEffect(() => {
-    if (!sheetRef.current || !route || isNavigating) {
-      onHeightChange?.(0);
-      return;
-    }
-
-    const updateHeight = () => {
-      if (sheetRef.current) {
-        const rect = sheetRef.current.getBoundingClientRect();
-        onHeightChange?.(rect.height);
-      }
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(sheetRef.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [route, isNavigating, isCollapsed, showSteps, onHeightChange]);
+    onToggleSteps(false);
+  }, [route?.destinationName, route?.geometry, onToggleSteps]);
 
   if (!route || isNavigating) return null;
 
@@ -93,6 +70,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
     return <ArrowUp className="w-4 h-4 text-zinc-300" />;
   };
 
+  // Export STRICTLY the clean pure URL (no title prefix, no extra text)
   const handleShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -105,9 +83,8 @@ export const RouteBottomSheet: React.FC<Props> = ({
 
       if (typeof navigator !== 'undefined' && navigator.share) {
         try {
+          // Pass strictly the URL so iOS/Android share sheet only exports the exact URL
           await navigator.share({
-            title: `${route.destinationName} - Mapout`,
-            text: `Route to ${route.destinationName} (${formatDuration(route.duration)}, ${formatDistance(route.distance)})`,
             url: shareUrl,
           });
           return;
@@ -116,7 +93,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
         }
       }
 
-      // Fallback: Copy preset link to clipboard
+      // Fallback: Copy exact clean URL string to clipboard
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(shareUrl);
         setIsCopied(true);
@@ -163,7 +140,6 @@ export const RouteBottomSheet: React.FC<Props> = ({
 
   return (
     <div
-      ref={sheetRef}
       id="route-bottom-sheet"
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -223,12 +199,12 @@ export const RouteBottomSheet: React.FC<Props> = ({
             <button
               onClick={handleShare}
               className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95 relative"
-              title="Share route link"
+              title="Share exact route link"
             >
               {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
               {isCopied && (
-                <span className="absolute -top-7 right-0 text-[10px] bg-emerald-500 text-black font-bold px-1.5 py-0.5 rounded shadow">
-                  Copied!
+                <span className="absolute -top-7 right-0 text-[10px] bg-emerald-500 text-black font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                  Link Copied!
                 </span>
               )}
             </button>
@@ -313,7 +289,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Action Buttons: Exactly 12px margin-top */}
+          {/* Action Buttons */}
           <div className="grid grid-cols-4 gap-2 mt-3">
             <button
               onClick={() => onStartNavigation(false)}
@@ -344,20 +320,20 @@ export const RouteBottomSheet: React.FC<Props> = ({
           {/* Turn-by-Turn Steps Bar */}
           <div className="mt-3">
             <button
-              onClick={() => setShowSteps(!showSteps)}
+              onClick={() => onToggleSteps(!isStepsOpen)}
               disabled={isLoadingRoute}
               className="w-full flex items-center justify-between py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition disabled:opacity-50"
             >
               <span className="min-h-[16px]">
                 {isLoadingRoute ? '' : `${route.steps.length} Turn-by-Turn Steps`}
               </span>
-              {!isLoadingRoute && (showSteps ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />)}
+              {!isLoadingRoute && (isStepsOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />)}
             </button>
 
             {/* Fluid Turn-by-Turn Dropdown with CSS Grid animated transition */}
             <div
               className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-                showSteps && !isLoadingRoute
+                isStepsOpen && !isLoadingRoute
                   ? 'grid-rows-[1fr] opacity-100 mt-2.5'
                   : 'grid-rows-[0fr] opacity-0 pointer-events-none mt-0'
               }`}

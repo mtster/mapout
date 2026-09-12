@@ -22,7 +22,8 @@ interface Props {
   isNavigating: boolean;
   bearing?: number;
   hasActiveDestination?: boolean;
-  bottomSheetHeight?: number;
+  isRouteSheetCollapsed?: boolean;
+  isStepsOpen?: boolean;
 }
 
 export const MapControls: React.FC<Props> = ({
@@ -38,7 +39,8 @@ export const MapControls: React.FC<Props> = ({
   isNavigating,
   bearing = 0,
   hasActiveDestination = false,
-  bottomSheetHeight = 0,
+  isRouteSheetCollapsed = false,
+  isStepsOpen = false,
 }) => {
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const layerMenuRef = useRef<HTMLDivElement>(null);
@@ -62,16 +64,23 @@ export const MapControls: React.FC<Props> = ({
 
   const isRotated = Math.abs(bearing % 360) > 1;
 
-  // Compute dynamic transform: directly track bottom sheet height with snug 10px spacing
-  const yOffset = hasActiveDestination && bottomSheetHeight > 0
-    ? `calc(-${bottomSheetHeight}px + 8px)`
-    : '0px';
+  // Exact rigid binding to bottom sheet motion: zero lag, identical CSS easing curve
+  let yOffset = '0px';
+  if (hasActiveDestination) {
+    if (isRouteSheetCollapsed) {
+      yOffset = 'calc(-84px - max(env(safe-area-inset-bottom, 0px), 16px) + 6px)';
+    } else if (isStepsOpen) {
+      yOffset = 'calc(-468px - max(env(safe-area-inset-bottom, 0px), 16px) + 6px)';
+    } else {
+      yOffset = 'calc(-268px - max(env(safe-area-inset-bottom, 0px), 16px) + 6px)';
+    }
+  }
 
   return (
     <div
       className="fixed right-3 sm:right-6 z-[1200] flex flex-col gap-2 pointer-events-auto transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
       style={{
-        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 8px)',
+        bottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 12px)',
         transform: `translate3d(0, ${yOffset}, 0)`,
       }}
     >

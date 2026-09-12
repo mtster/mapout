@@ -6,9 +6,17 @@
   "theme_color": "#000000",
   "background_color": "#000000",
   "display": "standalone",
+  "display_override": [
+    "standalone",
+    "window-controls-overlay"
+  ],
   "orientation": "portrait",
   "start_url": "/",
   "scope": "/",
+  "handle_links": "auto",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
   "icons": [
     {
       "src": "/apple-touch-icon.png",

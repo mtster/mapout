@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, MapPin, Navigation2, Coffee, Utensils, Fuel, ShoppingBag, TreePine, Loader2 } from 'lucide-react';
 import { PlaceResult, LatLng } from '../types';
-import { searchPlaces } from '../services/mapService';
+import { searchPlaces, formatDistance } from '../services/mapService';
 import { PWAInstallModal } from './PWAInstallModal';
 
 interface Props {
@@ -55,7 +55,7 @@ export const SearchBar: React.FC<Props> = ({
     }
   }, [selectedDestination]);
 
-  // Debounced search - only triggered by user typing/interaction, NOT by GPS coordinate updates
+  // Debounced search with proximity distance-decay prioritization
   useEffect(() => {
     if (!hasInteracted) return;
 
@@ -80,7 +80,7 @@ export const SearchBar: React.FC<Props> = ({
       } finally {
         setIsSearching(false);
       }
-    }, 350);
+    }, 300);
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -193,7 +193,7 @@ export const SearchBar: React.FC<Props> = ({
       {isOpen && results.length > 0 && (
         <div
           id="search-results-list"
-          className="w-full max-h-72 overflow-y-auto rounded-2xl bg-zinc-950/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.8)] divide-y divide-zinc-900"
+          className="w-full max-h-72 overflow-y-auto scrollable-content rounded-2xl bg-zinc-950/95 backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.8)] divide-y divide-zinc-900"
         >
           {results.map((place) => (
             <button
@@ -205,14 +205,21 @@ export const SearchBar: React.FC<Props> = ({
                 <MapPin className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-white truncate group-hover:text-sky-300 transition">
-                  {place.name}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-white truncate group-hover:text-sky-300 transition">
+                    {place.name}
+                  </span>
+                  {typeof place.distanceMeters === 'number' && (
+                    <span className="text-[11px] font-semibold text-sky-400/90 shrink-0 bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-800/30">
+                      {formatDistance(place.distanceMeters)}
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-zinc-400 truncate mt-0.5">
                   {place.label}
                 </div>
               </div>
-              <div className="shrink-0 self-center text-zinc-500 group-hover:text-white">
+              <div className="shrink-0 self-center text-zinc-500 group-hover:text-white ml-1">
                 <Navigation2 className="w-3.5 h-3.5" />
               </div>
             </button>

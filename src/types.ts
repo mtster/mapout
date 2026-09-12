@@ -13,6 +13,7 @@ export interface PlaceResult {
   category?: string;
   city?: string;
   country?: string;
+  distanceMeters?: number;
 }
 
 export interface RouteStep {

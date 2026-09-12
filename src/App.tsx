@@ -22,7 +22,7 @@ const STANDARD_NAV_ZOOM: Record<TravelMode, number> = {
 export default function App() {
   const [mapInstance, setMapInstance] = useState<MapLibreMap | null>(null);
   const [mapStyle, setMapStyle] = useState<MapStyle>('dark');
-  const [sheetHeight, setSheetHeight] = useState(0);
+  const [isStepsOpen, setIsStepsOpen] = useState(false);
 
   // Prevent browser window bouncing on pull gestures
   useEffect(() => {
@@ -128,6 +128,10 @@ export default function App() {
     }
   }, [mapInstance, setBearing]);
 
+  const handleToggleSteps = useCallback((open?: boolean) => {
+    setIsStepsOpen((prev) => (typeof open === 'boolean' ? open : !prev));
+  }, []);
+
   return (
     <main id="main-view" className="absolute inset-0 w-full h-full overflow-hidden bg-black text-white select-none touch-none">
       {/* Offline Connectivity Notification */}
@@ -163,7 +167,7 @@ export default function App() {
         isNavigating={isNavigating}
       />
 
-      {/* Attribution Button (Top-left below search bar, matching bottom-right control button styling) */}
+      {/* Attribution Button (Top-left below search bar) */}
       <AttributionButton isNavigating={isNavigating} />
 
       {/* Location Permission Notification Toast */}
@@ -196,7 +200,8 @@ export default function App() {
         isNavigating={isNavigating}
         bearing={bearing}
         hasActiveDestination={!!route && !isNavigating}
-        bottomSheetHeight={route ? sheetHeight : 0}
+        isRouteSheetCollapsed={isRouteSheetCollapsed}
+        isStepsOpen={isStepsOpen}
       />
 
       {/* Native Route Bottom Sheet */}
@@ -212,7 +217,8 @@ export default function App() {
         onToggleCollapse={(collapsed) =>
           setIsRouteSheetCollapsed(typeof collapsed === 'boolean' ? collapsed : !isRouteSheetCollapsed)
         }
-        onHeightChange={setSheetHeight}
+        isStepsOpen={isStepsOpen}
+        onToggleSteps={handleToggleSteps}
       />
 
       {/* Active Turn-by-Turn Navigation HUD */}
