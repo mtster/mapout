@@ -1,3 +1,4 @@
+import * as turf from '@turf/turf';
 import { LatLng, PlaceResult, RouteData, RouteStep, TravelMode } from '../types';
 
 // Debounce helper
@@ -331,59 +332,98 @@ export function calculateHaversineDistance(p1: LatLng, p2: LatLng): number {
   return Math.round(R * c);
 }
 
-// Project a point onto a line segment and calculate exact remaining distance along polyline to destination
-export function calculateRemainingDistanceAlongRoute(currentPos: LatLng, geometry: LatLng[]): number {
-  if (!geometry || geometry.length === 0) return 0;
-  if (geometry.length === 1) return calculateHaversineDistance(currentPos, geometry[0]);
-
-  let closestSegmentIndex = 0;
-  let minDistanceToSegment = Infinity;
-  let closestProjectedPoint: LatLng = geometry[0];
-
-  for (let i = 0; i < geometry.length - 1; i++) {
-    const a = geometry[i];
-    const b = geometry[i + 1];
-
-    const dx = b[1] - a[1];
-    const dy = b[0] - a[0];
-    const lenSq = dx * dx + dy * dy;
-
-    let t = 0;
-    if (lenSq > 0) {
-      t = ((currentPos[1] - a[1]) * dx + (currentPos[0] - a[0]) * dy) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-    }
-
-    const projected: LatLng = [a[0] + t * dy, a[1] + t * dx];
-    const dist = calculateHaversineDistance(currentPos, projected);
-
-    if (dist < minDistanceToSegment) {
-      minDistanceToSegment = dist;
-      closestSegmentIndex = i;
-      closestProjectedPoint = projected;
-    }
+// 1. Off-Route Distance in meters using Turf.js
+export function getOffRouteDistance(currentPos: LatLng, geometry: LatLng[]): number {
+  if (!geometry || geometry.length < 2) return 0;
+  try {
+    const pt = turf.point([currentPos[1], currentPos[0]]);
+    const line = turf.lineString(geometry.map((c) => [c[1], c[0]]));
+    const distKm = turf.pointToLineDistance(pt, line, { units: 'kilometers' });
+    return Math.round(distKm * 1000);
+  } catch (err) {
+    console.warn('Turf off-route calculation error:', err);
+    return 0;
   }
-
-  // Sum from current position to projected point + from projected point to segment end + remaining segments
-  let remaining = calculateHaversineDistance(currentPos, closestProjectedPoint);
-  remaining += calculateHaversineDistance(closestProjectedPoint, geometry[closestSegmentIndex + 1]);
-
-  for (let j = closestSegmentIndex + 1; j < geometry.length - 1; j++) {
-    remaining += calculateHaversineDistance(geometry[j], geometry[j + 1]);
-  }
-
-  return Math.round(remaining);
 }
 
-// Calculate bearing between two points in degrees (0 = North, 90 = East, 180 = South, 270 = West)
+// 2. Map Matching / Snapping using Turf.js (snaps to nearest point on route line if within threshold)
+export function snapToRoute(
+  currentPos: LatLng,
+  geometry: LatLng[],
+  maxSnapDistanceMeters = 35
+): { snapped: LatLng; distance: number } {
+  if (!geometry || geometry.length < 2) {
+    return { snapped: currentPos, distance: 0 };
+  }
+  try {
+    const pt = turf.point([currentPos[1], currentPos[0]]);
+    const line = turf.lineString(geometry.map((c) => [c[1], c[0]]));
+    const nearest = turf.nearestPointOnLine(line, pt, { units: 'kilometers' });
+    const distMeters = Math.round((nearest.properties.dist ?? 0) * 1000);
+
+    if (distMeters <= maxSnapDistanceMeters) {
+      const [lng, lat] = nearest.geometry.coordinates;
+      return { snapped: [lat, lng], distance: distMeters };
+    }
+    return { snapped: currentPos, distance: distMeters };
+  } catch (err) {
+    return { snapped: currentPos, distance: 0 };
+  }
+}
+
+// 3. Local ETA & Remaining Distance Updating using Turf.js (turf.lineSlice & turf.length)
+// Slices away the completed section of the route without making network API calls
+export function calculateRemainingRouteTurf(
+  currentPos: LatLng,
+  geometry: LatLng[],
+  destinationPos: LatLng
+): { remainingDistanceMeters: number; snappedPos: LatLng; offRouteDistance: number } {
+  if (!geometry || geometry.length < 2) {
+    const directDist = calculateHaversineDistance(currentPos, destinationPos);
+    return { remainingDistanceMeters: directDist, snappedPos: currentPos, offRouteDistance: 0 };
+  }
+
+  try {
+    const pt = turf.point([currentPos[1], currentPos[0]]);
+    const destPt = turf.point([destinationPos[1], destinationPos[0]]);
+    const line = turf.lineString(geometry.map((c) => [c[1], c[0]]));
+
+    const nearest = turf.nearestPointOnLine(line, pt, { units: 'kilometers' });
+    const offRouteDist = Math.round((nearest.properties.dist ?? 0) * 1000);
+    const [snappedLng, snappedLat] = nearest.geometry.coordinates;
+    const snappedPt = turf.point([snappedLng, snappedLat]);
+
+    const sliced = turf.lineSlice(snappedPt, destPt, line);
+    const slicedLengthKm = turf.length(sliced, { units: 'kilometers' });
+    const remainingDistanceMeters = Math.max(0, Math.round(slicedLengthKm * 1000));
+
+    return {
+      remainingDistanceMeters,
+      snappedPos: [snappedLat, snappedLng],
+      offRouteDistance: offRouteDist,
+    };
+  } catch (err) {
+    const fallbackDist = calculateHaversineDistance(currentPos, destinationPos);
+    return { remainingDistanceMeters: fallbackDist, snappedPos: currentPos, offRouteDistance: 0 };
+  }
+}
+
+// Calculate bearing between two points in degrees using Turf
 export function calculateBearing(start: LatLng, end: LatLng): number {
-  const lat1 = (start[0] * Math.PI) / 180;
-  const lat2 = (end[0] * Math.PI) / 180;
-  const dLng = ((end[1] - start[1]) * Math.PI) / 180;
+  try {
+    const p1 = turf.point([start[1], start[0]]);
+    const p2 = turf.point([end[1], end[0]]);
+    const b = turf.bearing(p1, p2);
+    return (b + 360) % 360;
+  } catch {
+    const lat1 = (start[0] * Math.PI) / 180;
+    const lat2 = (end[0] * Math.PI) / 180;
+    const dLng = ((end[1] - start[1]) * Math.PI) / 180;
 
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
 
-  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
-  return (bearing + 360) % 360;
+    const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+    return (bearing + 360) % 360;
+  }
 }

@@ -22,16 +22,64 @@ interface Props {
   onBearingChange?: (bearing: number) => void;
 }
 
-// 100% Free, Vector GPU-accelerated OpenFreeMap and Satellite raster styles
-// Eliminates CPU/GPU raster filtering, heating, and thermal battery drain
-const MAP_STYLES: Record<MapStyle, string | object> = {
-  // Obsidian Dark: Native dark vector tiles via OpenFreeMap WebGL
-  dark: 'https://tiles.openfreemap.org/styles/dark',
+// 100% Reliable, Hardware-Accelerated Basemap Styles
+// Guaranteed to load immediately without external font/sprite server dependencies
+const MAP_STYLES: Record<MapStyle, object> = {
+  // Obsidian Dark: Iconic CARTO Dark Matter (natively dark, high contrast, luminous roads)
+  dark: {
+    version: 8,
+    sources: {
+      'carto-dark': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        ],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+      },
+    },
+    layers: [
+      {
+        id: 'carto-dark-layer',
+        type: 'raster',
+        source: 'carto-dark',
+        minzoom: 0,
+        maxzoom: 20,
+      },
+    ],
+  },
 
-  // Pure Midnight: High-contrast dark vector tiles
-  midnight: 'https://tiles.openfreemap.org/styles/dark',
+  // Pure Midnight: High-Contrast Dark Street & Terrain Basemap
+  midnight: {
+    version: 8,
+    sources: {
+      'carto-midnight': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
+          'https://b.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
+          'https://c.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
+          'https://d.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}@2x.png',
+        ],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+      },
+    },
+    layers: [
+      {
+        id: 'carto-midnight-layer',
+        type: 'raster',
+        source: 'carto-midnight',
+        minzoom: 0,
+        maxzoom: 20,
+      },
+    ],
+  },
 
-  // Photorealistic Satellite with high-resolution imagery
+  // Photorealistic Satellite: Esri High-Resolution World Imagery
   satellite: {
     version: 8,
     sources: {
@@ -79,37 +127,101 @@ export const MapView: React.FC<Props> = ({
   const mapInstanceRef = useRef<MapLibreMap | null>(null);
   const userMarkerRef = useRef<Marker | null>(null);
   const destMarkerRef = useRef<Marker | null>(null);
+  const routeRef = useRef<RouteData | null>(route);
+  routeRef.current = route;
 
-  // Fresh mutable refs to avoid stale callbacks
+  // Fresh mutable refs
   const isNavigatingRef = useRef(isNavigating);
-  useEffect(() => {
-    isNavigatingRef.current = isNavigating;
-  }, [isNavigating]);
+  isNavigatingRef.current = isNavigating;
 
   const hasDestinationRef = useRef(hasDestination);
-  useEffect(() => {
-    hasDestinationRef.current = hasDestination;
-  }, [hasDestination]);
+  hasDestinationRef.current = hasDestination;
 
   const onMapClickRef = useRef(onMapClick);
-  useEffect(() => {
-    onMapClickRef.current = onMapClick;
-  }, [onMapClick]);
+  onMapClickRef.current = onMapClick;
 
   const onMapTapWithDestinationRef = useRef(onMapTapWithDestination);
-  useEffect(() => {
-    onMapTapWithDestinationRef.current = onMapTapWithDestination;
-  }, [onMapTapWithDestination]);
+  onMapTapWithDestinationRef.current = onMapTapWithDestination;
 
   const onUserPanOrZoomRef = useRef(onUserPanOrZoom);
-  useEffect(() => {
-    onUserPanOrZoomRef.current = onUserPanOrZoom;
-  }, [onUserPanOrZoom]);
+  onUserPanOrZoomRef.current = onUserPanOrZoom;
 
   const onBearingChangeRef = useRef(onBearingChange);
-  useEffect(() => {
-    onBearingChangeRef.current = onBearingChange;
-  }, [onBearingChange]);
+  onBearingChangeRef.current = onBearingChange;
+
+  // Helper to mount or refresh the route GeoJSON vector layer
+  const updateRouteLayer = (map: MapLibreMap, currentRoute: RouteData | null) => {
+    if (!map || !map.isStyleLoaded()) return;
+
+    const sourceId = 'active-route-source';
+    const casingLayerId = 'active-route-casing';
+    const lineLayerId = 'active-route-line';
+
+    const coords =
+      currentRoute?.geometry && currentRoute.geometry.length > 0
+        ? currentRoute.geometry.map((pt) => [pt[1], pt[0]])
+        : [];
+
+    const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'LineString',
+        coordinates: coords,
+      },
+    };
+
+    const existingSource = map.getSource(sourceId) as GeoJSONSource | undefined;
+
+    if (existingSource) {
+      existingSource.setData(geojson);
+    } else if (coords.length > 0) {
+      map.addSource(sourceId, {
+        type: 'geojson',
+        data: geojson,
+      });
+
+      if (!map.getLayer(casingLayerId)) {
+        map.addLayer({
+          id: casingLayerId,
+          type: 'line',
+          source: sourceId,
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round',
+          },
+          paint: {
+            'line-color': '#0284c7',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 6, 16, 11, 20, 16],
+            'line-opacity': 0.85,
+          },
+        });
+      }
+
+      if (!map.getLayer(lineLayerId)) {
+        map.addLayer({
+          id: lineLayerId,
+          type: 'line',
+          source: sourceId,
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round',
+          },
+          paint: {
+            'line-color': '#38bdf8',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 16, 6, 20, 10],
+            'line-opacity': 1.0,
+          },
+        });
+      }
+    }
+
+    if (coords.length === 0 && existingSource) {
+      if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
+      if (map.getLayer(casingLayerId)) map.removeLayer(casingLayerId);
+      map.removeSource(sourceId);
+    }
+  };
 
   // 1. Initialize MapLibre GL Map
   useEffect(() => {
@@ -138,11 +250,12 @@ export const MapView: React.FC<Props> = ({
 
     map.on('load', () => {
       onMapReady?.(map);
-      updateRouteLayer(map, route);
+      map.resize();
+      updateRouteLayer(map, routeRef.current);
     });
 
     map.on('style.load', () => {
-      updateRouteLayer(map, route);
+      updateRouteLayer(map, routeRef.current);
     });
 
     map.on('rotate', () => {
@@ -167,7 +280,14 @@ export const MapView: React.FC<Props> = ({
       }
     });
 
+    // Auto-resize on container dimensions change
+    const observer = new ResizeObserver(() => {
+      map.resize();
+    });
+    observer.observe(mapContainerRef.current);
+
     return () => {
+      observer.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -179,75 +299,6 @@ export const MapView: React.FC<Props> = ({
     if (!map) return;
     map.setStyle(MAP_STYLES[mapStyle] as any);
   }, [mapStyle]);
-
-  // Helper to mount or refresh the route GeoJSON vector layer
-  const updateRouteLayer = (map: MapLibreMap, currentRoute: RouteData | null) => {
-    if (!map.isStyleLoaded()) return;
-
-    const sourceId = 'active-route-source';
-    const casingLayerId = 'active-route-casing';
-    const lineLayerId = 'active-route-line';
-
-    const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates: currentRoute?.geometry
-          ? currentRoute.geometry.map((pt) => [pt[1], pt[0]])
-          : [],
-      },
-    };
-
-    const existingSource = map.getSource(sourceId) as GeoJSONSource | undefined;
-
-    if (existingSource) {
-      existingSource.setData(geojson);
-    } else if (currentRoute && currentRoute.geometry && currentRoute.geometry.length > 0) {
-      map.addSource(sourceId, {
-        type: 'geojson',
-        data: geojson,
-      });
-
-      // Background route casing
-      map.addLayer({
-        id: casingLayerId,
-        type: 'line',
-        source: sourceId,
-        layout: {
-          'line-join': 'round',
-          'line-cap': 'round',
-        },
-        paint: {
-          'line-color': '#0284c7',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 6, 16, 10, 20, 14],
-          'line-opacity': 0.8,
-        },
-      });
-
-      // Crisp electric sky foreground line
-      map.addLayer({
-        id: lineLayerId,
-        type: 'line',
-        source: sourceId,
-        layout: {
-          'line-join': 'round',
-          'line-cap': 'round',
-        },
-        paint: {
-          'line-color': '#38bdf8',
-          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 16, 5.5, 20, 9],
-          'line-opacity': 1.0,
-        },
-      });
-    }
-
-    if (!currentRoute && existingSource) {
-      if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
-      if (map.getLayer(casingLayerId)) map.removeLayer(casingLayerId);
-      map.removeSource(sourceId);
-    }
-  };
 
   // 3. Update route on map when route state changes
   useEffect(() => {
@@ -286,9 +337,10 @@ export const MapView: React.FC<Props> = ({
       return;
     }
 
-    const heading = isNavigating && targetHeading !== null && targetHeading !== undefined
-      ? targetHeading
-      : userLocation?.heading;
+    const heading =
+      isNavigating && targetHeading !== null && targetHeading !== undefined
+        ? targetHeading
+        : userLocation?.heading;
 
     if (!userMarkerRef.current) {
       const el = document.createElement('div');
@@ -375,21 +427,25 @@ export const MapView: React.FC<Props> = ({
     }
   }, [destination, isNavigating]);
 
-  // 6. Navigation Follow Camera Engine
+  // 6. Navigation Follow Camera Engine (3D 45 deg driving perspective)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !isNavigating || !isFollowingUser) return;
 
-    const targetCoord = activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
+    const targetCoord =
+      activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
     if (!targetCoord) return;
 
-    const bearing = typeof targetHeading === 'number' && !isNaN(targetHeading) ? targetHeading : map.getBearing();
+    const bearing =
+      typeof targetHeading === 'number' && !isNaN(targetHeading)
+        ? targetHeading
+        : map.getBearing();
 
     map.easeTo({
       center: [targetCoord[1], targetCoord[0]],
       zoom: standardNavZoom,
       bearing,
-      pitch: 45, // 3D driving perspective
+      pitch: 45,
       duration: 600,
     });
   }, [activeNavLocation, userLocation, isNavigating, isFollowingUser, targetHeading, standardNavZoom]);
@@ -400,10 +456,12 @@ export const MapView: React.FC<Props> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    const targetCoord = activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
+    const targetCoord =
+      activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
     if (!targetCoord) return;
 
-    const bearing = typeof targetHeading === 'number' && !isNaN(targetHeading) ? targetHeading : 0;
+    const bearing =
+      typeof targetHeading === 'number' && !isNaN(targetHeading) ? targetHeading : 0;
 
     map.flyTo({
       center: [targetCoord[1], targetCoord[0]],
