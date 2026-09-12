@@ -218,9 +218,9 @@ export const MapView: React.FC<Props> = ({
     });
 
     // Detect user manual pan/zoom to suspend auto-centering
-    map.on('dragstart', () => onUserPanOrZoomRef.current?.());
-    map.on('rotatestart', () => onUserPanOrZoomRef.current?.());
-    map.on('pitchstart', () => onUserPanOrZoomRef.current?.());
+    map.on('dragstart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
+    map.on('rotatestart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
+    map.on('pitchstart', (e) => { if (e.originalEvent) onUserPanOrZoomRef.current?.(); });
     map.on('zoomstart', (e) => {
       if (e.originalEvent) onUserPanOrZoomRef.current?.();
     });
@@ -409,6 +409,7 @@ export const MapView: React.FC<Props> = ({
       zoom: standardNavZoom,
       bearing: bearingToUse,
       pitch: 45,
+      padding: { top: 0, bottom: window.innerHeight * 0.4, left: 0, right: 0 },
       duration: 950,
       easing: (t) => t,
     });
@@ -432,6 +433,7 @@ export const MapView: React.FC<Props> = ({
       zoom: isNavigating ? standardNavZoom : 16,
       bearing: isNavigating ? bearing : 0,
       pitch: isNavigating ? 45 : 0,
+      padding: isNavigating ? { top: 0, bottom: window.innerHeight * 0.4, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 },
       duration: 800,
     });
   }, [recenterTrigger]);
@@ -441,7 +443,7 @@ export const MapView: React.FC<Props> = ({
       ref={mapContainerRef}
       id="map-container"
       className="absolute inset-0 bg-black cursor-crosshair z-0"
-      style={{ width: '100vw', height: '100dvh', position: 'absolute', top: 0, left: 0 }}
+      style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
     />
   );
 };
