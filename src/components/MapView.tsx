@@ -196,6 +196,7 @@ export const MapView: React.FC<Props> = ({
       dragRotate: true,
       touchPitch: true,
       touchZoomRotate: true,
+      trackResize: true,
       attributionControl: {
         compact: true,
       },
@@ -203,26 +204,13 @@ export const MapView: React.FC<Props> = ({
 
     mapInstanceRef.current = map;
 
-    const triggerResize = () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.resize();
-      }
-    };
-
     map.on('load', () => {
       onMapReady?.(map);
-      triggerResize();
       updateRouteLayer(map, routeRef.current);
-      // Run staggered resizes to accommodate initial CSS and container layout calculations
-      [0, 50, 150, 300, 600, 1000].forEach((delay) => {
-        setTimeout(triggerResize, delay);
-      });
     });
 
     map.on('style.load', () => {
-      triggerResize();
       updateRouteLayer(map, routeRef.current);
-      setTimeout(triggerResize, 100);
     });
 
     map.on('rotate', () => {
@@ -247,20 +235,7 @@ export const MapView: React.FC<Props> = ({
       }
     });
 
-    // Handle window resize and screen orientation change
-    window.addEventListener('resize', triggerResize);
-    window.addEventListener('orientationchange', triggerResize);
-
-    // Auto-resize on container dimensions change
-    const observer = new ResizeObserver(() => {
-      triggerResize();
-    });
-    observer.observe(mapContainerRef.current);
-
     return () => {
-      window.removeEventListener('resize', triggerResize);
-      window.removeEventListener('orientationchange', triggerResize);
-      observer.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -456,8 +431,8 @@ export const MapView: React.FC<Props> = ({
     <div
       ref={mapContainerRef}
       id="map-container"
-      className="w-full h-full absolute inset-0 bg-black cursor-crosshair z-0"
-      style={{ width: '100%', height: '100%' }}
+      className="absolute inset-0 bg-black cursor-crosshair z-0"
+      style={{ width: '100vw', height: '100dvh', position: 'absolute', top: 0, left: 0 }}
     />
   );
 };
