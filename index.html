@@ -5,12 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Mapout</title>
     <meta name="description" content="A minimalist, dark-themed, ultra-lightweight PWA map and navigation app with route calculation, live turn-by-turn guidance, and destination search." />
-    <meta property="og:title" content="Mapout" />
-    <meta property="og:description" content="A minimalist, dark-themed, ultra-lightweight PWA map and navigation app with route calculation, live turn-by-turn guidance, and destination search." />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="/icon-512.png?v=3" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="/icon-512.png?v=3" />
     
     <!-- PWA & Mobile Web App settings for native iOS & Android feel -->
     <meta name="theme-color" content="#000000" />
@@ -20,78 +14,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Mapout" />
     <meta name="format-detection" content="telephone=no" />
-
-    <!-- Favicons, Touch Icons, and Apple Web Clip configuration for iOS Safari -->
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon.png" />
-    <link rel="apple-touch-icon" sizes="120x120" href="/apple-touch-icon.png" />
-    <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon.png" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="manifest" href="/manifest.json" />
-    <script>
-      (function() {
-        function updateHardwareDimensions() {
-          var isLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight;
-          var screenH = window.screen ? window.screen.height : 0;
-          var screenW = window.screen ? window.screen.width : 0;
-          var innerH = window.innerHeight || 0;
-          var innerW = window.innerWidth || 0;
-          var vvH = (window.visualViewport && window.visualViewport.height) || 0;
-          var vvW = (window.visualViewport && window.visualViewport.width) || 0;
-          var docH = (document.documentElement && document.documentElement.clientHeight) || 0;
-          var docW = (document.documentElement && document.documentElement.clientWidth) || 0;
-
-          var maxScreenDim = Math.max(screenH, screenW);
-          var minScreenDim = Math.min(screenH, screenW);
-          var fullScreenH = isLandscape ? minScreenDim : maxScreenDim;
-          var fullScreenW = isLandscape ? maxScreenDim : minScreenDim;
-
-          var targetHeight = Math.max(fullScreenH, innerH, vvH, docH);
-          var targetWidth = Math.max(fullScreenW, innerW, vvW, docW);
-
-          if (targetHeight && targetWidth) {
-            document.documentElement.style.setProperty('--real-screen-height', targetHeight + 'px');
-            document.documentElement.style.setProperty('--real-screen-width', targetWidth + 'px');
-
-            var styleEl = document.getElementById('hardware-screen-style');
-            if (!styleEl) {
-              styleEl = document.createElement('style');
-              styleEl.id = 'hardware-screen-style';
-              document.head.appendChild(styleEl);
-            }
-            styleEl.textContent =
-              'html, body, #root, #main-view, #map-container {' +
-              '  width: ' + targetWidth + 'px !important;' +
-              '  min-width: ' + targetWidth + 'px !important;' +
-              '  height: ' + targetHeight + 'px !important;' +
-              '  min-height: ' + targetHeight + 'px !important;' +
-              '  bottom: auto !important;' +
-              '}' +
-              '.maplibregl-canvas-container, .maplibregl-canvas {' +
-              '  width: ' + targetWidth + 'px !important;' +
-              '  min-width: ' + targetWidth + 'px !important;' +
-              '  height: ' + targetHeight + 'px !important;' +
-              '  min-height: ' + targetHeight + 'px !important;' +
-              '  bottom: auto !important;' +
-              '}';
-          }
-        }
-        updateHardwareDimensions();
-        window.addEventListener('resize', updateHardwareDimensions, { passive: true });
-        window.addEventListener('orientationchange', updateHardwareDimensions, { passive: true });
-        if (window.visualViewport) {
-          window.visualViewport.addEventListener('resize', updateHardwareDimensions, { passive: true });
-        }
-      })();
-    </script>
+    
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   </head>
-  <body class="bg-black text-white m-0 p-0 overflow-hidden select-none touch-manipulation antialiased" style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; bottom: auto;">
-    <div id="root" class="fixed top-0 left-0 right-0 w-full" style="height: 100vh; height: var(--real-screen-height, 100vh); min-height: 100vh; min-height: var(--real-screen-height, 100vh); bottom: auto;"></div>
+  <body class="bg-black text-white m-0 p-0 overflow-hidden select-none touch-manipulation antialiased" style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;">
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

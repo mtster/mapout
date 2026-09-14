@@ -345,11 +345,6 @@ export const MapView: React.FC<Props> = ({
       ref={mapContainerRef}
       id="map-container"
       className="absolute top-0 left-0 right-0 w-full bg-black cursor-crosshair z-0"
-      style={{
-        height: 'var(--real-screen-height, 100vh)',
-        minHeight: 'var(--real-screen-height, 100vh)',
-        bottom: 'auto',
-      }}
     />
   );
 };
