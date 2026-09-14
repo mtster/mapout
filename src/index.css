@@ -18,7 +18,6 @@ body,
   bottom: 0;
   margin: 0;
   padding: 0;
-  padding-top: env(safe-area-inset-top, 0px);
   overflow: hidden !important;
   overscroll-behavior: none !important;
   overscroll-behavior-y: none !important;
@@ -134,3 +133,29 @@ main,
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* TEMPORARY DIAGNOSTIC STYLES - REMOVE AFTER DEBUGGING */
+html {
+  background-color: red !important;
+}
+
+body {
+  background-color: green !important;
+}
+
+#root {
+  background-color: blue !important;
+}
+
+main {
+  background-color: yellow !important;
+}
+
+#map-container {
+  background-color: magenta !important;
+}
+
+.maplibregl-canvas {
+  outline: 4px solid cyan !important;
+}
+
