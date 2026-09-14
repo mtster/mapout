@@ -36,27 +36,35 @@
     <script>
       (function() {
         function updateHardwareDimensions() {
-          var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
-            (navigator.maxTouchPoints > 0 && window.innerWidth <= 1024);
-          var h = window.innerHeight || document.documentElement.clientHeight || 0;
-          var w = window.innerWidth || document.documentElement.clientWidth || 0;
-          if (isMobile) {
-            var isLandscape = Math.abs(Number(window.orientation || 0)) === 90 || window.innerWidth > window.innerHeight;
-            var rawH = window.screen ? window.screen.height : 0;
-            var rawW = window.screen ? window.screen.width : 0;
-            var screenH = isLandscape ? Math.min(rawH, rawW) : Math.max(rawH, rawW);
-            var screenW = isLandscape ? Math.max(rawH, rawW) : Math.min(rawH, rawW);
-            h = Math.max(screenH, window.screen ? window.screen.availHeight || 0 : 0, window.innerHeight || 0, document.documentElement.clientHeight || 0);
-            w = Math.max(screenW, window.screen ? window.screen.availWidth || 0 : 0, window.innerWidth || 0, document.documentElement.clientWidth || 0);
-          }
-          if (h && w) {
-            document.documentElement.style.setProperty('--real-screen-height', h + 'px');
-            document.documentElement.style.setProperty('--real-screen-width', w + 'px');
+          var isLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight;
+          var screenH = window.screen ? window.screen.height : 0;
+          var screenW = window.screen ? window.screen.width : 0;
+          var innerH = window.innerHeight || 0;
+          var innerW = window.innerWidth || 0;
+          var vvH = (window.visualViewport && window.visualViewport.height) || 0;
+          var vvW = (window.visualViewport && window.visualViewport.width) || 0;
+          var docH = (document.documentElement && document.documentElement.clientHeight) || 0;
+          var docW = (document.documentElement && document.documentElement.clientWidth) || 0;
+
+          var maxScreenDim = Math.max(screenH, screenW);
+          var minScreenDim = Math.min(screenH, screenW);
+          var fullScreenH = isLandscape ? minScreenDim : maxScreenDim;
+          var fullScreenW = isLandscape ? maxScreenDim : minScreenDim;
+
+          var targetHeight = Math.max(fullScreenH, innerH, vvH, docH);
+          var targetWidth = Math.max(fullScreenW, innerW, vvW, docW);
+
+          if (targetHeight && targetWidth) {
+            document.documentElement.style.setProperty('--real-screen-height', targetHeight + 'px');
+            document.documentElement.style.setProperty('--real-screen-width', targetWidth + 'px');
           }
         }
         updateHardwareDimensions();
-        window.addEventListener('resize', updateHardwareDimensions);
-        window.addEventListener('orientationchange', updateHardwareDimensions);
+        window.addEventListener('resize', updateHardwareDimensions, { passive: true });
+        window.addEventListener('orientationchange', updateHardwareDimensions, { passive: true });
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', updateHardwareDimensions, { passive: true });
+        }
       })();
     </script>
   </head>

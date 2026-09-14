@@ -11,17 +11,18 @@
 html,
 body,
 #root {
-  width: 100vw;
-  width: var(--real-screen-width, 100vw);
-  height: 100vh;
-  height: var(--real-screen-height, 100vh);
-  min-height: var(--real-screen-height, 100vh);
+  width: 100%;
+  height: 100%;
+  width: var(--real-screen-width, 100%);
+  height: var(--real-screen-height, 100%);
+  min-height: var(--real-screen-height, 100%);
   margin: 0;
   padding: 0;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
+  bottom: 0;
   overflow: hidden !important;
   overscroll-behavior: none !important;
   overscroll-behavior-y: none !important;
@@ -39,13 +40,16 @@ body,
 main,
 #main-view {
   position: absolute !important;
+  inset: 0 !important;
   top: 0 !important;
   left: 0 !important;
-  width: 100vw !important;
-  width: var(--real-screen-width, 100vw) !important;
-  height: 100vh !important;
-  height: var(--real-screen-height, 100vh) !important;
-  min-height: var(--real-screen-height, 100vh) !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  width: var(--real-screen-width, 100%) !important;
+  height: 100% !important;
+  height: var(--real-screen-height, 100%) !important;
+  min-height: var(--real-screen-height, 100%) !important;
   overflow: hidden !important;
   overscroll-behavior: none !important;
   touch-action: none;
@@ -55,8 +59,11 @@ main,
 #map-container,
 .maplibregl-map {
   position: absolute !important;
+  inset: 0 !important;
   top: 0 !important;
   left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   width: 100% !important;
   width: var(--real-screen-width, 100%) !important;
   height: 100% !important;
@@ -67,19 +74,7 @@ main,
   touch-action: none;
 }
 
-.maplibregl-canvas-container {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  min-width: 100% !important;
-  min-height: 100% !important;
-  pointer-events: auto;
-}
-
+.maplibregl-canvas-container,
 .maplibregl-canvas {
   position: absolute !important;
   top: 0 !important;
@@ -90,6 +85,10 @@ main,
   height: 100% !important;
   min-width: 100% !important;
   min-height: 100% !important;
+}
+
+.maplibregl-canvas-container {
+  pointer-events: auto;
 }
 
 .maplibregl-marker {
