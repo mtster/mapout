@@ -33,6 +33,32 @@
     <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="manifest" href="/manifest.json" />
+    <script>
+      (function() {
+        function updateHardwareDimensions() {
+          var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+            (navigator.maxTouchPoints > 0 && window.innerWidth <= 1024);
+          var h = window.innerHeight || document.documentElement.clientHeight || 0;
+          var w = window.innerWidth || document.documentElement.clientWidth || 0;
+          if (isMobile) {
+            var isLandscape = Math.abs(Number(window.orientation || 0)) === 90 || window.innerWidth > window.innerHeight;
+            var rawH = window.screen ? window.screen.height : 0;
+            var rawW = window.screen ? window.screen.width : 0;
+            var screenH = isLandscape ? Math.min(rawH, rawW) : Math.max(rawH, rawW);
+            var screenW = isLandscape ? Math.max(rawH, rawW) : Math.min(rawH, rawW);
+            h = Math.max(screenH, window.screen ? window.screen.availHeight || 0 : 0, window.innerHeight || 0, document.documentElement.clientHeight || 0);
+            w = Math.max(screenW, window.screen ? window.screen.availWidth || 0 : 0, window.innerWidth || 0, document.documentElement.clientWidth || 0);
+          }
+          if (h && w) {
+            document.documentElement.style.setProperty('--real-screen-height', h + 'px');
+            document.documentElement.style.setProperty('--real-screen-width', w + 'px');
+          }
+        }
+        updateHardwareDimensions();
+        window.addEventListener('resize', updateHardwareDimensions);
+        window.addEventListener('orientationchange', updateHardwareDimensions);
+      })();
+    </script>
   </head>
   <body class="bg-black text-white m-0 p-0 overflow-hidden select-none touch-manipulation antialiased" style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;">
     <div id="root" class="absolute inset-0 w-full h-full"></div>

@@ -11,6 +11,7 @@ import { AttributionButton } from './components/AttributionButton';
 import { useUserLocation } from './hooks/useUserLocation';
 import { useRoutePlanner } from './hooks/useRoutePlanner';
 import { useNavigationEngine } from './hooks/useNavigationEngine';
+import { useExactViewport } from './hooks/useExactViewport';
 
 // Standard zoom levels for active navigation
 const STANDARD_NAV_ZOOM: Record<TravelMode, number> = {
@@ -20,6 +21,9 @@ const STANDARD_NAV_ZOOM: Record<TravelMode, number> = {
 };
 
 export default function App() {
+  // Enforce full hardware screen size at the App root
+  useExactViewport();
+
   const [mapInstance, setMapInstance] = useState<MapLibreMap | null>(null);
   const [mapStyle, setMapStyle] = useState<MapStyle>('dark');
   const [isStepsOpen, setIsStepsOpen] = useState(false);
