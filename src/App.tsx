@@ -170,7 +170,7 @@ export default function App() {
   return (
     <main
       id="main-view"
-      className="absolute top-0 left-0 right-0 w-full overflow-hidden bg-black text-white select-none touch-none"
+      className="fixed inset-0 overflow-hidden bg-black text-white select-none touch-none"
     >
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
