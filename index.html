@@ -15,6 +15,29 @@
     <meta name="apple-mobile-web-app-title" content="Mapout" />
     <meta name="format-detection" content="telephone=no" />
     
+    <style>
+      :root {
+        --app-width: 100vw;
+        --app-height: 100vh;
+      }
+    </style>
+    <script>
+      function updateViewportDims() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        document.documentElement.style.setProperty('--app-width', width + 'px');
+        document.documentElement.style.setProperty('--app-height', height + 'px');
+      }
+      
+      // Update dimensions immediately and on resize/orientation changes
+      updateViewportDims();
+      window.addEventListener('resize', updateViewportDims, { passive: true });
+      window.addEventListener('orientationchange', updateViewportDims, { passive: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateViewportDims, { passive: true });
+      }
+    </script>
+    
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
 
     <!-- Mobile DevTools (Eruda) -->
