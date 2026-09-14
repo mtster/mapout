@@ -8,7 +8,6 @@ import { NavigationHUD } from './components/NavigationHUD';
 import { MapControls } from './components/MapControls';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { AttributionButton } from './components/AttributionButton';
-import { ViewportDebugHUD } from './components/ViewportDebugHUD';
 import { useUserLocation } from './hooks/useUserLocation';
 import { useRoutePlanner } from './hooks/useRoutePlanner';
 import { useNavigationEngine } from './hooks/useNavigationEngine';
@@ -289,9 +288,6 @@ export default function App() {
           onToggleRouteOverview={handleToggleRouteOverview}
         />
       )}
-
-      {/* On-screen Realtime Viewport Telemetry HUD for debugging on iPhone */}
-      <ViewportDebugHUD />
     </main>
   );
 }
