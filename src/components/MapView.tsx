@@ -354,7 +354,7 @@ export const MapView: React.FC<Props> = ({
     <div
       ref={mapContainerRef}
       id="map-container"
-      className="fixed inset-0 bg-black cursor-crosshair z-0"
+      className="absolute top-0 left-0 bg-black cursor-crosshair z-0"
     />
   );
 };
