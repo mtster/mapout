@@ -57,6 +57,28 @@
           if (targetHeight && targetWidth) {
             document.documentElement.style.setProperty('--real-screen-height', targetHeight + 'px');
             document.documentElement.style.setProperty('--real-screen-width', targetWidth + 'px');
+
+            var styleEl = document.getElementById('hardware-screen-style');
+            if (!styleEl) {
+              styleEl = document.createElement('style');
+              styleEl.id = 'hardware-screen-style';
+              document.head.appendChild(styleEl);
+            }
+            styleEl.textContent =
+              'html, body, #root, #main-view, #map-container {' +
+              '  width: ' + targetWidth + 'px !important;' +
+              '  min-width: ' + targetWidth + 'px !important;' +
+              '  height: ' + targetHeight + 'px !important;' +
+              '  min-height: ' + targetHeight + 'px !important;' +
+              '  bottom: auto !important;' +
+              '}' +
+              '.maplibregl-canvas-container, .maplibregl-canvas {' +
+              '  width: ' + targetWidth + 'px !important;' +
+              '  min-width: ' + targetWidth + 'px !important;' +
+              '  height: ' + targetHeight + 'px !important;' +
+              '  min-height: ' + targetHeight + 'px !important;' +
+              '  bottom: auto !important;' +
+              '}';
           }
         }
         updateHardwareDimensions();
@@ -68,8 +90,8 @@
       })();
     </script>
   </head>
-  <body class="bg-black text-white m-0 p-0 overflow-hidden select-none touch-manipulation antialiased" style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;">
-    <div id="root" class="absolute inset-0 w-full h-full"></div>
+  <body class="bg-black text-white m-0 p-0 overflow-hidden select-none touch-manipulation antialiased" style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; bottom: auto;">
+    <div id="root" class="fixed top-0 left-0 right-0 w-full" style="height: 100vh; height: var(--real-screen-height, 100vh); min-height: 100vh; min-height: var(--real-screen-height, 100vh); bottom: auto;"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

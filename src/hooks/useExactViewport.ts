@@ -50,19 +50,46 @@ export function useExactViewport(
       document.documentElement.style.setProperty('--real-screen-height', `${targetHeight}px`);
       document.documentElement.style.setProperty('--real-screen-width', `${targetWidth}px`);
 
-      // 3. Direct Inline Overrides with !important:
-      // Apply targetHeight directly to root, documentElement, body, and main-view
+      // Dynamic stylesheet injection to override any layout viewport constraints immediately
+      let styleEl = document.getElementById('hardware-screen-style');
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'hardware-screen-style';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = `
+        html, body, #root, #main-view, #map-container {
+          width: ${targetWidth}px !important;
+          min-width: ${targetWidth}px !important;
+          height: ${targetHeight}px !important;
+          min-height: ${targetHeight}px !important;
+          bottom: auto !important;
+        }
+        .maplibregl-canvas-container, .maplibregl-canvas {
+          width: ${targetWidth}px !important;
+          min-width: ${targetWidth}px !important;
+          height: ${targetHeight}px !important;
+          min-height: ${targetHeight}px !important;
+          bottom: auto !important;
+        }
+      `;
+
+      // Direct Inline Overrides with !important:
+      // Apply targetHeight and bottom: auto directly to root, documentElement, body, and main-view
       document.documentElement.style.setProperty('height', `${targetHeight}px`, 'important');
       document.documentElement.style.setProperty('min-height', `${targetHeight}px`, 'important');
+      document.documentElement.style.setProperty('bottom', 'auto', 'important');
 
       document.body.style.setProperty('height', `${targetHeight}px`, 'important');
       document.body.style.setProperty('min-height', `${targetHeight}px`, 'important');
+      document.body.style.setProperty('bottom', 'auto', 'important');
 
       const rootEl = document.getElementById('root');
       if (rootEl) {
         rootEl.style.setProperty('height', `${targetHeight}px`, 'important');
         rootEl.style.setProperty('min-height', `${targetHeight}px`, 'important');
         rootEl.style.setProperty('width', `${targetWidth}px`, 'important');
+        rootEl.style.setProperty('bottom', 'auto', 'important');
       }
 
       const mainEl = document.getElementById('main-view');
@@ -70,6 +97,7 @@ export function useExactViewport(
         mainEl.style.setProperty('height', `${targetHeight}px`, 'important');
         mainEl.style.setProperty('min-height', `${targetHeight}px`, 'important');
         mainEl.style.setProperty('width', `${targetWidth}px`, 'important');
+        mainEl.style.setProperty('bottom', 'auto', 'important');
       }
 
       // Apply targetHeight in exact physical pixels directly to #map-container and WebGL canvas elements
@@ -79,6 +107,7 @@ export function useExactViewport(
         container.style.setProperty('min-height', `${targetHeight}px`, 'important');
         container.style.setProperty('width', `${targetWidth}px`, 'important');
         container.style.setProperty('min-width', `${targetWidth}px`, 'important');
+        container.style.setProperty('bottom', 'auto', 'important');
 
         const canvasContainer = container.querySelector('.maplibregl-canvas-container') as HTMLElement | null;
         const canvas = container.querySelector('.maplibregl-canvas') as HTMLElement | null;
@@ -87,12 +116,14 @@ export function useExactViewport(
           canvasContainer.style.setProperty('min-height', `${targetHeight}px`, 'important');
           canvasContainer.style.setProperty('width', `${targetWidth}px`, 'important');
           canvasContainer.style.setProperty('min-width', `${targetWidth}px`, 'important');
+          canvasContainer.style.setProperty('bottom', 'auto', 'important');
         }
         if (canvas) {
           canvas.style.setProperty('height', `${targetHeight}px`, 'important');
           canvas.style.setProperty('min-height', `${targetHeight}px`, 'important');
           canvas.style.setProperty('width', `${targetWidth}px`, 'important');
           canvas.style.setProperty('min-width', `${targetWidth}px`, 'important');
+          canvas.style.setProperty('bottom', 'auto', 'important');
         }
       }
 

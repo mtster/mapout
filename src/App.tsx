@@ -168,7 +168,15 @@ export default function App() {
   }, [isSearchOpen, isAttributionOpen, isLayerMenuOpen, handleMapTapWithDestination]);
 
   return (
-    <main id="main-view" className="absolute inset-0 w-full h-full overflow-hidden bg-black text-white select-none touch-none">
+    <main
+      id="main-view"
+      className="absolute top-0 left-0 right-0 w-full overflow-hidden bg-black text-white select-none touch-none"
+      style={{
+        height: 'var(--real-screen-height, 100vh)',
+        minHeight: 'var(--real-screen-height, 100vh)',
+        bottom: 'auto',
+      }}
+    >
       {/* Offline Connectivity Notification */}
       <OfflineIndicator />
 
