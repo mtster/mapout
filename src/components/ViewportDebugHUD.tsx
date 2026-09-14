@@ -117,7 +117,7 @@ export const ViewportDebugHUD: React.FC = () => {
   }, []);
 
   const applyLiveTest = (testKey: string) => {
-    const targets = ['#root', 'main', '#map-container']
+    const targets = ['html', 'body', '#root', 'main', '#map-container']
       .map((sel) => document.querySelector(sel) as HTMLElement)
       .filter(Boolean);
 
@@ -132,13 +132,13 @@ export const ViewportDebugHUD: React.FC = () => {
         el.style.setProperty('height', 'auto', 'important');
       } else if (testKey === '100lvh') {
         el.style.setProperty('height', '100lvh', 'important');
-        el.style.removeProperty('bottom');
+        el.style.setProperty('bottom', 'auto', 'important');
       } else if (testKey === '100vh') {
         el.style.setProperty('height', '100vh', 'important');
-        el.style.removeProperty('bottom');
+        el.style.setProperty('bottom', 'auto', 'important');
       } else if (testKey === 'screen-height') {
         el.style.setProperty('height', `${window.screen.height}px`, 'important');
-        el.style.removeProperty('bottom');
+        el.style.setProperty('bottom', 'auto', 'important');
       }
     });
 

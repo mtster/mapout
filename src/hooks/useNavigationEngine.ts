@@ -286,9 +286,10 @@ export function useNavigationEngine({
         }
       },
       (err) => {
+        if (err.code === 3 /* TIMEOUT */) return;
         console.warn('Navigation GPS watch error:', err.message);
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 1000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
     );
   }, [setUserLocation, setRemainingDistance, setRemainingDuration, setRoute, setTargetArrivalTimestamp, stopNavigation]);
 

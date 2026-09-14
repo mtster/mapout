@@ -120,9 +120,13 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
         }
       },
       (err) => {
+        // Code 3 is TIMEOUT: occurs naturally when mobile GPS hardware is idle, indoors, or switching tabs
+        if (err.code === 3 /* TIMEOUT */) {
+          return;
+        }
         console.warn('Continuous GPS watch error:', err.message);
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 }
     );
 
     return () => {
