@@ -12,6 +12,7 @@ interface ElementMetrics {
 
 export const ViewportDebugHUD: React.FC = () => {
   const [isOpen, setIsOpen] = useState(true);
+  const [activeTest, setActiveTest] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<{
     inner: string;
     outer: string;
@@ -20,6 +21,7 @@ export const ViewportDebugHUD: React.FC = () => {
     dpr: number;
     standalone: boolean;
     safeArea: string;
+    units: { vh: number; dvh: number; lvh: number; svh: number };
     elements: ElementMetrics[];
   } | null>(null);
 
@@ -42,6 +44,23 @@ export const ViewportDebugHUD: React.FC = () => {
           offsetH: el.offsetHeight,
         };
       });
+
+      // Measure CSS units
+      const measureUnit = (unitStr: string): number => {
+        const testEl = document.createElement('div');
+        testEl.style.cssText = `position:fixed;top:0;left:0;height:${unitStr};visibility:hidden;pointer-events:none;`;
+        document.body.appendChild(testEl);
+        const h = Math.round(testEl.getBoundingClientRect().height);
+        document.body.removeChild(testEl);
+        return h;
+      };
+
+      const units = {
+        vh: measureUnit('100vh'),
+        dvh: measureUnit('100dvh'),
+        lvh: measureUnit('100lvh'),
+        svh: measureUnit('100svh'),
+      };
 
       // Probe CSS safe area insets
       const div = document.createElement('div');
@@ -72,6 +91,7 @@ export const ViewportDebugHUD: React.FC = () => {
         dpr: window.devicePixelRatio || 1,
         standalone: isStandalone,
         safeArea,
+        units,
         elements: elMetrics,
       });
     };
@@ -96,6 +116,36 @@ export const ViewportDebugHUD: React.FC = () => {
     };
   }, []);
 
+  const applyLiveTest = (testKey: string) => {
+    const targets = ['#root', 'main', '#map-container']
+      .map((sel) => document.querySelector(sel) as HTMLElement)
+      .filter(Boolean);
+
+    targets.forEach((el) => {
+      if (testKey === 'reset') {
+        el.style.removeProperty('height');
+        el.style.removeProperty('bottom');
+        el.style.removeProperty('min-height');
+      } else if (testKey === 'bottom-offset') {
+        // Bridge the exact 59px Dynamic Island delta
+        el.style.setProperty('bottom', 'calc(0px - env(safe-area-inset-top, 59px))', 'important');
+        el.style.setProperty('height', 'auto', 'important');
+      } else if (testKey === '100lvh') {
+        el.style.setProperty('height', '100lvh', 'important');
+        el.style.removeProperty('bottom');
+      } else if (testKey === '100vh') {
+        el.style.setProperty('height', '100vh', 'important');
+        el.style.removeProperty('bottom');
+      } else if (testKey === 'screen-height') {
+        el.style.setProperty('height', `${window.screen.height}px`, 'important');
+        el.style.removeProperty('bottom');
+      }
+    });
+
+    setActiveTest(testKey === 'reset' ? null : testKey);
+    window.dispatchEvent(new Event('resize'));
+  };
+
   const copyDiagnostic = () => {
     if (!metrics) return;
     const report = {
@@ -108,7 +158,9 @@ export const ViewportDebugHUD: React.FC = () => {
         dpr: metrics.dpr,
         standalone: metrics.standalone,
         safeArea: metrics.safeArea,
+        cssUnits: metrics.units,
       },
+      activeTest,
       elements: metrics.elements,
     };
     navigator.clipboard?.writeText(JSON.stringify(report, null, 2));
@@ -159,6 +211,77 @@ export const ViewportDebugHUD: React.FC = () => {
             <div><strong>Inner:</strong> {metrics.inner}</div>
             <div><strong>VisualVP:</strong> {metrics.vv}</div>
             <div><strong>Safe Area:</strong> {metrics.safeArea}</div>
+            <div style={{ color: '#00ffff' }}>
+              <strong>CSS Units:</strong> vh:{metrics.units.vh}px | dvh:{metrics.units.dvh}px | lvh:{metrics.units.lvh}px | svh:{metrics.units.svh}px
+            </div>
+          </div>
+
+          <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #444' }}>
+            <div style={{ fontWeight: 'bold', color: '#ffcc00', marginBottom: '4px' }}>
+              🧪 Tap To Test Live Fix: {activeTest ? `[${activeTest}]` : '(default)'}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '4px' }}>
+              <button
+                onClick={() => applyLiveTest('100lvh')}
+                style={{
+                  background: activeTest === '100lvh' ? '#ffcc00' : '#222',
+                  color: activeTest === '100lvh' ? '#000' : '#fff',
+                  border: '1px solid #555',
+                  borderRadius: '4px',
+                  padding: '4px 2px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                }}
+              >
+                1. Apply 100lvh
+              </button>
+              <button
+                onClick={() => applyLiveTest('bottom-offset')}
+                style={{
+                  background: activeTest === 'bottom-offset' ? '#ffcc00' : '#222',
+                  color: activeTest === 'bottom-offset' ? '#000' : '#fff',
+                  border: '1px solid #555',
+                  borderRadius: '4px',
+                  padding: '4px 2px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                }}
+              >
+                2. Bottom: -59px
+              </button>
+              <button
+                onClick={() => applyLiveTest('screen-height')}
+                style={{
+                  background: activeTest === 'screen-height' ? '#ffcc00' : '#222',
+                  color: activeTest === 'screen-height' ? '#000' : '#fff',
+                  border: '1px solid #555',
+                  borderRadius: '4px',
+                  padding: '4px 2px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                }}
+              >
+                3. Screen (932px)
+              </button>
+              <button
+                onClick={() => applyLiveTest('reset')}
+                style={{
+                  background: '#441111',
+                  color: '#ff8888',
+                  border: '1px solid #662222',
+                  borderRadius: '4px',
+                  padding: '4px 2px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                }}
+              >
+                Reset Default
+              </button>
+            </div>
           </div>
 
           <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #444' }}>

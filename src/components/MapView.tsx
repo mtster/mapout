@@ -111,6 +111,16 @@ export const MapView: React.FC<Props> = ({
 
     mapInstanceRef.current = map;
 
+    // Gracefully handle missing sprite icons to keep console clean
+    map.on('styleimagemissing', (e) => {
+      const id = e.id;
+      if (!map.hasImage(id)) {
+        // Provide a 1x1 transparent pixel placeholder
+        const emptyImage = new ImageData(1, 1);
+        map.addImage(id, emptyImage);
+      }
+    });
+
     map.on('load', () => {
       map.resize();
       setTimeout(() => map.resize(), 100);

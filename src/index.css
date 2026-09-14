@@ -159,3 +159,13 @@ main {
   outline: 4px solid cyan !important;
 }
 
+/* Ensure Eruda Mobile DevTools is completely interactive, scrollable and responsive to touch */
+.eruda-container,
+#eruda,
+.eruda-container * {
+  touch-action: auto !important;
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
