@@ -48,6 +48,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
   onToggleSteps,
 }) => {
   const [isCopied, setIsCopied] = React.useState(false);
+  const sheetContainerRef = useRef<HTMLDivElement>(null);
 
   // Drag tracking state
   const dragStartYRef = useRef<number | null>(null);
@@ -58,6 +59,28 @@ export const RouteBottomSheet: React.FC<Props> = ({
   useEffect(() => {
     onToggleSteps(false);
   }, [route?.destinationName, route?.geometry, onToggleSteps]);
+
+  // Continuously sync actual rendered sheet height to CSS variable --route-sheet-height
+  // This allows map controls and other floating UI to stay at the exact same distance above the sheet
+  useEffect(() => {
+    const el = sheetContainerRef.current;
+    if (!el) return;
+
+    const syncHeight = () => {
+      const rect = el.getBoundingClientRect();
+      const h = Math.round(rect.height);
+      document.documentElement.style.setProperty('--route-sheet-height', `${h}px`);
+    };
+
+    syncHeight();
+    const ro = new ResizeObserver(syncHeight);
+    ro.observe(el);
+
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.setProperty('--route-sheet-height', '0px');
+    };
+  }, [isCollapsed, isStepsOpen, route]);
 
   if (!route || isNavigating) return null;
 
@@ -141,6 +164,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
   return (
     <div
       id="route-bottom-sheet"
+      ref={sheetContainerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
@@ -153,69 +177,76 @@ export const RouteBottomSheet: React.FC<Props> = ({
         paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)',
       }}
     >
-      {/* Interactive Drag Handle Header */}
+      {/* Interactive Upper Section: supports dragging to collapse or expand across drag handle, address, and header row */}
       <div
         onPointerDown={handlePointerDown}
-        onClick={() => {
-          if (isCollapsed) onToggleCollapse(false);
-        }}
-        className="w-full flex flex-col items-center pt-2.5 pb-1 cursor-grab active:cursor-grabbing hover:bg-white/[0.02] transition"
+        className="w-full cursor-grab active:cursor-grabbing select-none touch-none"
       >
-        <div className="w-10 h-1 rounded-full bg-zinc-600/70" />
-      </div>
-
-      {/* Top Header Row with Destination Title and Action Controls */}
-      <div className="px-5 pt-1 pb-1 flex items-center justify-between gap-3">
-        <div
-          className="min-w-0 flex-1 cursor-pointer"
-          onClick={() => onToggleCollapse(!isCollapsed)}
-        >
-          <div className="flex items-center gap-1.5 text-[11px] text-sky-400 font-semibold tracking-wide uppercase">
-            <span>{isCollapsed ? 'Route' : 'Destination'}</span>
-          </div>
-          <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate leading-tight mt-0.5">
-            {route.destinationName}
-          </h2>
-          {isCollapsed && !isLoadingRoute && (
-            <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
-              <span className="font-semibold text-white">{formatDuration(route.duration)}</span>
-              <span>•</span>
-              <span>{formatDistance(route.distance)}</span>
-              <span>•</span>
-              <span className="text-emerald-400 font-medium">ETA {formatETA(route.duration)}</span>
-            </div>
-          )}
+        {/* Horizontal Drag Handle */}
+        <div className="w-full flex flex-col items-center pt-2.5 pb-1 hover:bg-white/[0.02] transition">
+          <div className="w-10 h-1 rounded-full bg-zinc-600/70" />
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => onToggleCollapse(!isCollapsed)}
-            className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-            title={isCollapsed ? 'Expand route details' : 'Collapse route sheet'}
+        {/* Top Header Row with Destination Title and Action Controls */}
+        <div className="px-5 pt-1 pb-1 flex items-center justify-between gap-3">
+          <div
+            className="min-w-0 flex-1 cursor-pointer"
+            onClick={() => {
+              if (Math.abs(dragOffset) < 5) {
+                onToggleCollapse(!isCollapsed);
+              }
+            }}
           >
-            {isCollapsed ? <ChevronUp className="w-4 h-4 text-sky-400" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-          {!isCollapsed && (
+            <div className="flex items-center gap-1.5 text-[11px] text-sky-400 font-semibold tracking-wide uppercase">
+              <span>{isCollapsed ? 'Route' : 'Destination'}</span>
+            </div>
+            <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate leading-tight mt-0.5">
+              {route.destinationName}
+            </h2>
+            {isCollapsed && !isLoadingRoute && (
+              <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
+                <span className="font-semibold text-white">{formatDuration(route.duration)}</span>
+                <span>•</span>
+                <span>{formatDistance(route.distance)}</span>
+                <span>•</span>
+                <span className="text-emerald-400 font-medium">ETA {formatETA(route.duration)}</span>
+              </div>
+            )}
+          </div>
+
+          <div
+            className="flex items-center gap-1.5 shrink-0"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <button
-              onClick={handleShare}
-              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95 relative"
-              title="Share exact route link"
+              onClick={() => onToggleCollapse(!isCollapsed)}
+              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
+              title={isCollapsed ? 'Expand route details' : 'Collapse route sheet'}
             >
-              {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
-              {isCopied && (
-                <span className="absolute -top-7 right-0 text-[10px] bg-emerald-500 text-black font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap">
-                  Link Copied!
-                </span>
-              )}
+              {isCollapsed ? <ChevronUp className="w-4 h-4 text-sky-400" /> : <ChevronDown className="w-4 h-4" />}
             </button>
-          )}
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
-            title="Close route"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            {!isCollapsed && (
+              <button
+                onClick={handleShare}
+                className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95 relative"
+                title="Share exact route link"
+              >
+                {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
+                {isCopied && (
+                  <span className="absolute -top-7 right-0 text-[10px] bg-emerald-500 text-black font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                    Link Copied!
+                  </span>
+                )}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95"
+              title="Close route"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 

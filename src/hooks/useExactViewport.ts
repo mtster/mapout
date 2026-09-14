@@ -2,8 +2,8 @@ import { useEffect, RefObject } from 'react';
 import { Map as MapLibreMap } from 'maplibre-gl';
 
 /**
- * Ensures the map canvas and app root fill the exact dynamic viewport on mobile, PWA,
- * and desktop browsers, preventing any bottom gaps or phantom overflows.
+ * Ensures the map canvas and app root fill the exact physical hardware screen height on mobile,
+ * iOS Safari, WebClip, PWA, and desktop browsers, preventing any bottom gaps or phantom overflows.
  */
 export function useExactViewport(
   containerRef: RefObject<HTMLDivElement | null>,
@@ -11,18 +11,20 @@ export function useExactViewport(
 ) {
   useEffect(() => {
     const applyExactDimensions = () => {
-      // Use visualViewport if supported for high-precision mobile browser toolbar handling,
-      // falling back to innerHeight / clientHeight.
-      const targetHeight =
-        window.visualViewport?.height ||
-        window.innerHeight ||
-        document.documentElement?.clientHeight ||
-        0;
-      const targetWidth =
-        window.visualViewport?.width ||
-        window.innerWidth ||
-        document.documentElement?.clientWidth ||
-        0;
+      // Find the hardware screen real dimensions where content can be displayed,
+      // bypassing iOS layout viewport restriction to ensure 100% gapless edge-to-edge coverage.
+      const targetHeight = Math.max(
+        window.screen?.height || 0,
+        window.innerHeight || 0,
+        window.visualViewport?.height || 0,
+        document.documentElement?.clientHeight || 0
+      );
+      const targetWidth = Math.max(
+        window.screen?.width || 0,
+        window.innerWidth || 0,
+        window.visualViewport?.width || 0,
+        document.documentElement?.clientWidth || 0
+      );
 
       if (targetHeight === 0 || targetWidth === 0) return;
 

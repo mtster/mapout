@@ -7,8 +7,32 @@ export interface MarkerRefs {
   destMarker: Marker | null;
 }
 
+interface UserMarkerAnimationState {
+  rafId: number | null;
+  startLng: number;
+  startLat: number;
+  targetLng: number;
+  targetLat: number;
+  startTime: number;
+  duration: number;
+  speed: number;
+}
+
+const markerAnimState: UserMarkerAnimationState = {
+  rafId: null,
+  startLng: 0,
+  startLat: 0,
+  targetLng: 0,
+  targetLat: 0,
+  startTime: 0,
+  duration: 1000,
+  speed: 0,
+};
+
 /**
- * Creates or updates the User Location GPS marker with accuracy pulse & rotating heading cone
+ * Creates or updates the User Location GPS marker with accuracy pulse & rotating heading cone.
+ * In navigation mode, uses continuous 60 FPS constant-speed linear interpolation with dead-reckoning
+ * forward extrapolation so the marker never teleports or lags behind during high-speed driving.
  */
 export function updateUserLocationMarker(
   map: MapLibreMap,
@@ -16,7 +40,8 @@ export function updateUserLocationMarker(
   userLocation: UserLocation | null,
   activeNavLocation: LatLng | null,
   isNavigating: boolean,
-  targetHeading?: number | null
+  targetHeading?: number | null,
+  speedKmh?: number
 ) {
   const activeLoc: LatLng | null =
     isNavigating && activeNavLocation
@@ -26,6 +51,10 @@ export function updateUserLocationMarker(
       : null;
 
   if (!activeLoc) {
+    if (markerAnimState.rafId) {
+      cancelAnimationFrame(markerAnimState.rafId);
+      markerAnimState.rafId = null;
+    }
     if (userMarkerRef.current) {
       userMarkerRef.current.remove();
       userMarkerRef.current = null;
@@ -37,6 +66,8 @@ export function updateUserLocationMarker(
     isNavigating && targetHeading !== null && targetHeading !== undefined
       ? targetHeading
       : userLocation?.heading;
+
+  const currentSpeed = typeof speedKmh === 'number' ? speedKmh : (userLocation?.speed || 0);
 
   if (!userMarkerRef.current) {
     const el = document.createElement('div');
@@ -55,8 +86,92 @@ export function updateUserLocationMarker(
       .addTo(map);
 
     userMarkerRef.current = marker;
+    markerAnimState.startLng = activeLoc[1];
+    markerAnimState.startLat = activeLoc[0];
+    markerAnimState.targetLng = activeLoc[1];
+    markerAnimState.targetLat = activeLoc[0];
   } else {
-    userMarkerRef.current.setLngLat([activeLoc[1], activeLoc[0]]);
+    const marker = userMarkerRef.current;
+    const targetLng = activeLoc[1];
+    const targetLat = activeLoc[0];
+
+    if (!isNavigating) {
+      // Idle mode: immediate update
+      if (markerAnimState.rafId) {
+        cancelAnimationFrame(markerAnimState.rafId);
+        markerAnimState.rafId = null;
+      }
+      marker.setLngLat([targetLng, targetLat]);
+    } else {
+      // Navigation mode: 60 FPS continuous glide with constant speed
+      const curLngLat = marker.getLngLat();
+      const currentLng = curLngLat.lng;
+      const currentLat = curLngLat.lat;
+
+      const dLng = targetLng - currentLng;
+      const dLat = targetLat - currentLat;
+      const distSq = dLng * dLng + dLat * dLat;
+
+      // If position jumped dramatically (e.g. initial start, > 1km), snap directly
+      if (distSq > 0.001) {
+        if (markerAnimState.rafId) {
+          cancelAnimationFrame(markerAnimState.rafId);
+          markerAnimState.rafId = null;
+        }
+        marker.setLngLat([targetLng, targetLat]);
+        markerAnimState.startLng = targetLng;
+        markerAnimState.startLat = targetLat;
+        markerAnimState.targetLng = targetLng;
+        markerAnimState.targetLat = targetLat;
+      } else if (distSq > 0.00000001) {
+        // Start smooth constant-speed interpolation towards target
+        if (markerAnimState.rafId) {
+          cancelAnimationFrame(markerAnimState.rafId);
+        }
+
+        markerAnimState.startLng = currentLng;
+        markerAnimState.startLat = currentLat;
+        markerAnimState.targetLng = targetLng;
+        markerAnimState.targetLat = targetLat;
+        markerAnimState.startTime = performance.now();
+        markerAnimState.duration = 1000;
+        markerAnimState.speed = currentSpeed;
+
+        const animateGlide = (now: number) => {
+          const elapsed = now - markerAnimState.startTime;
+          const progress = elapsed / markerAnimState.duration;
+
+          if (progress <= 1) {
+            const interpolatedLng =
+              markerAnimState.startLng + (markerAnimState.targetLng - markerAnimState.startLng) * progress;
+            const interpolatedLat =
+              markerAnimState.startLat + (markerAnimState.targetLat - markerAnimState.startLat) * progress;
+            marker.setLngLat([interpolatedLng, interpolatedLat]);
+            markerAnimState.rafId = requestAnimationFrame(animateGlide);
+          } else if (markerAnimState.speed > 2) {
+            // Forward dead-reckoning extrapolation at constant speed if next GPS fix takes > 1.0s
+            const extraProgress = Math.min(progress - 1, 1.2);
+            const deltaLng = markerAnimState.targetLng - markerAnimState.startLng;
+            const deltaLat = markerAnimState.targetLat - markerAnimState.startLat;
+            const extrapolatedLng = markerAnimState.targetLng + deltaLng * extraProgress;
+            const extrapolatedLat = markerAnimState.targetLat + deltaLat * extraProgress;
+            marker.setLngLat([extrapolatedLng, extrapolatedLat]);
+
+            if (extraProgress < 1.2) {
+              markerAnimState.rafId = requestAnimationFrame(animateGlide);
+            } else {
+              markerAnimState.rafId = null;
+            }
+          } else {
+            // Vehicle stopped: settle cleanly
+            marker.setLngLat([markerAnimState.targetLng, markerAnimState.targetLat]);
+            markerAnimState.rafId = null;
+          }
+        };
+
+        markerAnimState.rafId = requestAnimationFrame(animateGlide);
+      }
+    }
   }
 
   // Update heading rotation cone if available
@@ -76,7 +191,7 @@ export function updateUserLocationMarker(
 /**
  * Creates or updates the Destination Pin marker.
  * The bottom pointer tip of the pin is anchored strictly at the exact dropped coordinate.
- * Any scaling transforms grow upwards from the needle tip (origin: 50% 100%).
+ * Any scaling transforms grow upwards from the needle tip (origin: 16px 44px).
  */
 export function updateDestinationMarker(
   map: MapLibreMap,

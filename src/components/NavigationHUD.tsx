@@ -12,6 +12,7 @@ import {
   Gauge,
   Clock,
   LocateFixed,
+  Route as RouteIcon,
 } from 'lucide-react';
 import { RouteData, RouteStep } from '../types';
 import { formatDistance, formatDuration, formatETA } from '../services/mapService';
@@ -30,6 +31,8 @@ interface Props {
   isSimulated: boolean;
   onNextStep?: () => void;
   targetArrivalTimestamp?: number | null;
+  isRouteOverview?: boolean;
+  onToggleRouteOverview?: () => void;
 }
 
 export const NavigationHUD: React.FC<Props> = ({
@@ -46,6 +49,8 @@ export const NavigationHUD: React.FC<Props> = ({
   isSimulated,
   onNextStep,
   targetArrivalTimestamp,
+  isRouteOverview,
+  onToggleRouteOverview,
 }) => {
   const currentStep: RouteStep | undefined = route.steps[currentStepIndex] || route.steps[route.steps.length - 1];
   const nextStep: RouteStep | undefined = route.steps[currentStepIndex + 1];
@@ -195,15 +200,33 @@ export const NavigationHUD: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* End Navigation Button */}
-          <button
-            onClick={onEndNavigation}
-            id="end-navigation-btn"
-            className="flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider shadow-[0_0_20px_rgba(225,29,72,0.4)] active:scale-95 transition shrink-0"
-          >
-            <X className="w-4 h-4" />
-            <span>End</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Route Overview / Full Route Zoom-out Button */}
+            {onToggleRouteOverview && (
+              <button
+                onClick={onToggleRouteOverview}
+                id="nav-route-overview-btn"
+                className={`flex items-center justify-center p-2.5 rounded-2xl border transition active:scale-95 ${
+                  isRouteOverview
+                    ? 'bg-sky-500/20 border-sky-400 text-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.3)]'
+                    : 'bg-zinc-900/90 border-white/10 text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+                title={isRouteOverview ? 'Resume turn-by-turn follow camera' : 'View entire route'}
+              >
+                <RouteIcon className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* End Navigation Button */}
+            <button
+              onClick={onEndNavigation}
+              id="end-navigation-btn"
+              className="flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider shadow-[0_0_20px_rgba(225,29,72,0.4)] active:scale-95 transition"
+            >
+              <X className="w-4 h-4" />
+              <span>End</span>
+            </button>
+          </div>
         </div>
       </div>
     </>

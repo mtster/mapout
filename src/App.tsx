@@ -95,6 +95,7 @@ export default function App() {
     isNavigating,
     isSimulated,
     isFollowingUser,
+    isRouteOverview,
     currentNavHeading,
     bearing,
     setBearing,
@@ -108,6 +109,7 @@ export default function App() {
     handleToggleVoice,
     handleUserPanOrZoom,
     handleRecenter,
+    handleToggleRouteOverview,
     handleNextStep,
   } = useNavigationEngine({
     mapInstance,
@@ -179,6 +181,7 @@ export default function App() {
         onMapTapWithDestination={handleMapTapWithDestinationIntercepted}
         onMapReady={setMapInstance}
         isFollowingUser={isFollowingUser}
+        isRouteOverview={isRouteOverview}
         onUserPanOrZoom={handleUserPanOrZoom}
         targetHeading={currentNavHeading}
         standardNavZoom={STANDARD_NAV_ZOOM[travelMode]}
@@ -274,6 +277,8 @@ export default function App() {
           showRecenter={!isFollowingUser}
           isSimulated={isSimulated}
           onNextStep={isSimulated ? handleNextStep : undefined}
+          isRouteOverview={isRouteOverview}
+          onToggleRouteOverview={handleToggleRouteOverview}
         />
       )}
     </main>

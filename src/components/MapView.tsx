@@ -9,6 +9,7 @@ import {
   updateUserLocationMarker,
   updateDestinationMarker,
   fitRouteBounds,
+  fitNavRouteOverview,
   followNavigationCamera,
   recenterMapCamera,
 } from './map';
@@ -25,6 +26,7 @@ interface Props {
   onMapTapWithDestination?: () => void;
   onMapReady?: (map: MapLibreMap) => void;
   isFollowingUser?: boolean;
+  isRouteOverview?: boolean;
   onUserPanOrZoom?: () => void;
   targetHeading?: number | null;
   standardNavZoom?: number;
@@ -45,6 +47,7 @@ export const MapView: React.FC<Props> = ({
   onMapTapWithDestination,
   onMapReady,
   isFollowingUser = true,
+  isRouteOverview = false,
   onUserPanOrZoom,
   targetHeading,
   standardNavZoom = 17,
@@ -276,7 +279,7 @@ export const MapView: React.FC<Props> = ({
     }
   }, [route, isNavigating]);
 
-  // 4. Render and update User Location marker
+  // 4. Render and update User Location marker with continuous 60fps constant speed interpolation
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -286,7 +289,8 @@ export const MapView: React.FC<Props> = ({
       userLocation,
       activeNavLocation,
       isNavigating,
-      targetHeading
+      targetHeading,
+      userLocation?.speed
     );
   }, [userLocation, activeNavLocation, isNavigating, targetHeading]);
 
@@ -306,16 +310,24 @@ export const MapView: React.FC<Props> = ({
   // 6. Navigation Follow Camera Engine (Fluid 60 FPS GPU-Accelerated Perspective)
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map || !isNavigating || !isFollowingUser) return;
+    if (!map || !isNavigating || !isFollowingUser || isRouteOverview) return;
 
     const targetCoord =
       activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
     if (!targetCoord) return;
 
     followNavigationCamera(map, targetCoord, targetHeading, standardNavZoom);
-  }, [activeNavLocation, userLocation, isNavigating, isFollowingUser, targetHeading, standardNavZoom]);
+  }, [activeNavLocation, userLocation, isNavigating, isFollowingUser, isRouteOverview, targetHeading, standardNavZoom]);
 
-  // 7. Recenter trigger
+  // 7. Route Overview Zoom-Out Mode during navigation
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !isNavigating || !route || !isRouteOverview) return;
+
+    fitNavRouteOverview(map, route);
+  }, [isRouteOverview, isNavigating, route]);
+
+  // 8. Recenter trigger
   useEffect(() => {
     if (recenterTrigger === 0) return;
     const map = mapInstanceRef.current;

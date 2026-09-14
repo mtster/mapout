@@ -77,11 +77,15 @@ export function useNavigationEngine({
   const simulationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const simIndexRef = useRef(0);
 
-  // Stop Navigation
+  // Route overview zoom-out mode during navigation
+  const [isRouteOverview, setIsRouteOverview] = useState(false);
+
+  // Stop Navigation: preserves map camera exactly where the user is looking
   const stopNavigation = useCallback(() => {
     setIsNavigating(false);
     setIsSimulated(false);
     setIsFollowingUser(true);
+    setIsRouteOverview(false);
     setActiveNavLocation(null);
     setCurrentNavHeading(null);
     offRouteCounterRef.current = 0;
@@ -99,24 +103,12 @@ export function useNavigationEngine({
     }
 
     if (mapInstance) {
-      if (userLocation) {
-        mapInstance.easeTo({
-          center: [userLocation.lng, userLocation.lat],
-          zoom: 16,
-          pitch: 0,
-          bearing: 0,
-          duration: 600,
-        });
-        setIsCenteredOnUser(true);
-      } else {
-        mapInstance.easeTo({
-          pitch: 0,
-          bearing: 0,
-          duration: 400,
-        });
-      }
+      mapInstance.easeTo({
+        pitch: 0,
+        duration: 400,
+      });
     }
-  }, [mapInstance, userLocation, setIsCenteredOnUser]);
+  }, [mapInstance]);
 
   // Start Simulation with Turf local calculation
   const startSimulation = useCallback(
@@ -355,13 +347,29 @@ export function useNavigationEngine({
     setIsCenteredOnUser(false);
     if (isNavigating) {
       setIsFollowingUser(false);
+      setIsRouteOverview(false);
     }
   }, [isNavigating, setIsCenteredOnUser]);
 
-  // Recenter during navigation
+  // Recenter during navigation: restores standard 3D perspective turn-by-turn follow camera
   const handleRecenter = useCallback(() => {
+    setIsRouteOverview(false);
     setIsFollowingUser(true);
     setRecenterTrigger((prev) => prev + 1);
+  }, []);
+
+  // Toggle Route Overview zoom-out during navigation
+  const handleToggleRouteOverview = useCallback(() => {
+    setIsRouteOverview((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsFollowingUser(false);
+      } else {
+        setIsFollowingUser(true);
+        setRecenterTrigger((r) => r + 1);
+      }
+      return next;
+    });
   }, []);
 
   // Manual next step in simulation
@@ -381,6 +389,7 @@ export function useNavigationEngine({
     isNavigating,
     isSimulated,
     isFollowingUser,
+    isRouteOverview,
     currentNavHeading,
     bearing,
     setBearing,
@@ -394,6 +403,7 @@ export function useNavigationEngine({
     handleToggleVoice,
     handleUserPanOrZoom,
     handleRecenter,
+    handleToggleRouteOverview,
     handleNextStep,
   };
 }
