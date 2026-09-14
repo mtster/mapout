@@ -23,8 +23,22 @@
     </style>
     <script>
       function updateViewportDims() {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+        // Detect if the app is running as an installed PWA (Standalone)
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+        
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        
+        // In iOS standalone mode, innerHeight often incorrectly excludes the top/bottom safe areas (e.g. 873px instead of 932px).
+        // To guarantee edge-to-edge rendering without gaps, we force the physical screen dimensions.
+        if (isStandalone) {
+          const isLandscape = window.innerWidth > window.innerHeight;
+          const screenW = window.screen.width;
+          const screenH = window.screen.height;
+          width = isLandscape ? Math.max(screenW, screenH) : Math.min(screenW, screenH);
+          height = isLandscape ? Math.min(screenW, screenH) : Math.max(screenW, screenH);
+        }
+        
         document.documentElement.style.setProperty('--app-width', width + 'px');
         document.documentElement.style.setProperty('--app-height', height + 'px');
       }
