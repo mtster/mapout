@@ -17,11 +17,12 @@ import {
   Share2,
   Check,
 } from 'lucide-react';
-import { RouteData, TravelMode } from '../types';
+import { PlaceResult, RouteData, TravelMode } from '../types';
 import { formatDistance, formatDuration, formatETA } from '../services/mapService';
 
 interface Props {
   route: RouteData | null;
+  destination?: PlaceResult | null;
   isLoadingRoute: boolean;
   travelMode: TravelMode;
   onChangeMode: (mode: TravelMode) => void;
@@ -36,6 +37,7 @@ interface Props {
 
 export const RouteBottomSheet: React.FC<Props> = ({
   route,
+  destination,
   isLoadingRoute,
   travelMode,
   onChangeMode,
@@ -82,7 +84,9 @@ export const RouteBottomSheet: React.FC<Props> = ({
     };
   }, [isCollapsed, isStepsOpen, route]);
 
-  if (!route || isNavigating) return null;
+  if ((!route && !destination) || isNavigating) return null;
+
+  const destName = destination?.name || route?.destinationName || 'Dropped Pin';
 
   const getManeuverIcon = (modifier = '', type = '') => {
     const mod = modifier.toLowerCase();
@@ -96,6 +100,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
   // Export STRICTLY the clean pure URL (no title prefix, no extra text)
   const handleShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!route) return;
     try {
       const url = new URL(window.location.origin + window.location.pathname);
       url.searchParams.set('dlat', route.endPoint[0].toFixed(6));
@@ -201,15 +206,24 @@ export const RouteBottomSheet: React.FC<Props> = ({
               <span>{isCollapsed ? 'Route' : 'Destination'}</span>
             </div>
             <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate leading-tight mt-0.5">
-              {route.destinationName}
+              {destName}
             </h2>
-            {isCollapsed && !isLoadingRoute && (
+            {isCollapsed && (
               <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
-                <span className="font-semibold text-white">{formatDuration(route.duration)}</span>
-                <span>•</span>
-                <span>{formatDistance(route.distance)}</span>
-                <span>•</span>
-                <span className="text-emerald-400 font-medium">ETA {formatETA(route.duration)}</span>
+                {isLoadingRoute || !route ? (
+                  <div className="flex items-center gap-1.5 text-zinc-400">
+                    <div className="w-2.5 h-2.5 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
+                    <span>Calculating route...</span>
+                  </div>
+                ) : (
+                  <>
+                    <span className="font-semibold text-white">{formatDuration(route.duration)}</span>
+                    <span>•</span>
+                    <span>{formatDistance(route.distance)}</span>
+                    <span>•</span>
+                    <span className="text-emerald-400 font-medium">ETA {formatETA(route.duration)}</span>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -225,7 +239,7 @@ export const RouteBottomSheet: React.FC<Props> = ({
             >
               {isCollapsed ? <ChevronUp className="w-4 h-4 text-sky-400" /> : <ChevronDown className="w-4 h-4" />}
             </button>
-            {!isCollapsed && (
+            {!isCollapsed && route && (
               <button
                 onClick={handleShare}
                 className="p-2 rounded-full text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 transition active:scale-95 relative"
@@ -302,7 +316,12 @@ export const RouteBottomSheet: React.FC<Props> = ({
 
           {/* Route Metrics Row */}
           <div className="min-h-[48px] flex items-center justify-between py-1 border-b border-zinc-900">
-            {isLoadingRoute ? null : (
+            {isLoadingRoute || !route ? (
+              <div className="flex items-center gap-2.5 py-2 text-zinc-400">
+                <div className="w-4 h-4 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
+                <span className="text-xs font-medium text-zinc-300">Calculating best route...</span>
+              </div>
+            ) : (
               <>
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-extrabold tracking-tight text-white">
@@ -325,22 +344,31 @@ export const RouteBottomSheet: React.FC<Props> = ({
             <button
               onClick={() => onStartNavigation(false)}
               id="start-navigation-btn"
-              disabled={isLoadingRoute}
+              disabled={isLoadingRoute || !route}
               className={`col-span-3 flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl font-bold text-sm tracking-wide shadow-[0_0_24px_rgba(56,189,248,0.4)] active:scale-[0.98] transition ${
-                isLoadingRoute
+                isLoadingRoute || !route
                   ? 'bg-sky-600/40 text-black/40 cursor-not-allowed'
                   : 'bg-sky-500 hover:bg-sky-400 text-black'
               }`}
             >
-              <Play className="w-4 h-4 fill-current" />
-              <span>Start Navigation</span>
+              {isLoadingRoute || !route ? (
+                <>
+                  <div className="w-4 h-4 rounded-full border-2 border-black/40 border-t-transparent animate-spin" />
+                  <span>Calculating Route...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>Start Navigation</span>
+                </>
+              )}
             </button>
 
             <button
               onClick={() => onStartNavigation(true)}
               id="simulate-navigation-btn"
-              disabled={isLoadingRoute}
-              className="col-span-1 flex flex-col items-center justify-center rounded-2xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-[11px] font-medium transition active:scale-95 py-2 disabled:opacity-50"
+              disabled={isLoadingRoute || !route}
+              className="col-span-1 flex flex-col items-center justify-center rounded-2xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-[11px] font-medium transition active:scale-95 py-2 disabled:opacity-40 disabled:cursor-not-allowed"
               title="Preview simulated navigation"
             >
               <Compass className="w-4 h-4 text-sky-400 mb-0.5" />
@@ -352,39 +380,41 @@ export const RouteBottomSheet: React.FC<Props> = ({
           <div className="mt-3">
             <button
               onClick={() => onToggleSteps(!isStepsOpen)}
-              disabled={isLoadingRoute}
-              className="w-full flex items-center justify-between py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition disabled:opacity-50"
+              disabled={isLoadingRoute || !route}
+              className="w-full flex items-center justify-between py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition disabled:opacity-40"
             >
               <span className="min-h-[16px]">
-                {isLoadingRoute ? '' : `${route.steps.length} Turn-by-Turn Steps`}
+                {isLoadingRoute || !route ? 'Loading turn instructions...' : `${route.steps.length} Turn-by-Turn Steps`}
               </span>
-              {!isLoadingRoute && (isStepsOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />)}
+              {!isLoadingRoute && route && (isStepsOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />)}
             </button>
 
             {/* Fluid Turn-by-Turn Dropdown with CSS Grid animated transition */}
             <div
               className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-                isStepsOpen && !isLoadingRoute
+                isStepsOpen && !isLoadingRoute && route
                   ? 'grid-rows-[1fr] opacity-100 mt-2.5'
                   : 'grid-rows-[0fr] opacity-0 pointer-events-none mt-0'
               }`}
             >
               <div className="overflow-hidden">
-                <div className="max-h-52 overflow-y-auto scrollable-content rounded-2xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-900/80 p-1">
-                  {route.steps.map((step, idx) => (
-                    <div key={step.id || idx} className="flex items-start gap-3 p-3 text-xs">
-                      <div className="p-1.5 rounded-lg bg-zinc-800 mt-0.5 shrink-0">
-                        {getManeuverIcon(step.modifier, step.type)}
+                {route && (
+                  <div className="max-h-52 overflow-y-auto scrollable-content rounded-2xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-900/80 p-1">
+                    {route.steps.map((step, idx) => (
+                      <div key={step.id || idx} className="flex items-start gap-3 p-3 text-xs">
+                        <div className="p-1.5 rounded-lg bg-zinc-800 mt-0.5 shrink-0">
+                          {getManeuverIcon(step.modifier, step.type)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-zinc-200 font-medium leading-snug">{step.instruction}</p>
+                          {step.distance > 0 && (
+                            <p className="text-[11px] text-zinc-500 mt-0.5">{formatDistance(step.distance)}</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-zinc-200 font-medium leading-snug">{step.instruction}</p>
-                        {step.distance > 0 && (
-                          <p className="text-[11px] text-zinc-500 mt-0.5">{formatDistance(step.distance)}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

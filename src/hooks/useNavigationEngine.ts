@@ -70,6 +70,7 @@ export function useNavigationEngine({
   selectedDestinationRef.current = selectedDestination;
 
   const offRouteCounterRef = useRef(0);
+  const wasSnappedRef = useRef(true);
   const lastRerouteTimeRef = useRef(0);
   const isReroutingRef = useRef(false);
 
@@ -89,6 +90,7 @@ export function useNavigationEngine({
     setActiveNavLocation(null);
     setCurrentNavHeading(null);
     offRouteCounterRef.current = 0;
+    wasSnappedRef.current = true;
     isReroutingRef.current = false;
     voiceGuidance.stop();
 
@@ -183,44 +185,67 @@ export function useNavigationEngine({
         const currentRoute = routeRef.current;
         const dest = selectedDestinationRef.current;
 
-        let roadHeading = pos.coords.heading;
-        if (
-          (roadHeading === null || roadHeading === undefined || isNaN(roadHeading) || roadHeading < 0) &&
-          currentRoute &&
-          currentRoute.geometry
-        ) {
-          const routeTangent = getRouteHeadingAtPoint(rawCoords, currentRoute.geometry);
-          if (routeTangent !== null) {
-            roadHeading = routeTangent;
-          } else {
-            const nextTarget =
-              currentRoute.geometry[
-                Math.min(currentStepIndexRef.current + 1, currentRoute.geometry.length - 1)
-              ];
-            roadHeading = calculateBearing(rawCoords, nextTarget);
-          }
-        }
-        if (roadHeading !== null && roadHeading !== undefined && !isNaN(roadHeading)) {
-          setCurrentNavHeading(roadHeading);
-        }
-
-        setUserLocation({
-          lat: rawCoords[0],
-          lng: rawCoords[1],
-          heading: roadHeading ?? undefined,
-          speed: speedKmh,
-          accuracy: pos.coords.accuracy,
-        });
-
         if (currentRoute && currentRoute.geometry && dest) {
           const destCoords: LatLng = [dest.lat, dest.lng];
 
           // 1. Turf calculation for map matching & local slicing
           const turfResult = calculateRemainingRouteTurf(rawCoords, currentRoute.geometry, destCoords);
+          const offDist = turfResult.offRouteDistance;
 
-          // 2. Map Matching / Snapping: Snap to route centerline if within 35m
-          const snapped = snapToRoute(rawCoords, currentRoute.geometry, 35);
-          setActiveNavLocation(snapped.snapped);
+          // 2. Intelligent Route Corridor Snapping with Hysteresis
+          // While on-route, generous 65m corridor absorbs GPS accuracy jitter and wide road lanes.
+          // If recovering from off-route, requires 45m proximity to snap back.
+          const snapThreshold = wasSnappedRef.current ? 65 : 45;
+          const isWithinCorridor = offDist <= snapThreshold;
+
+          if (!isWithinCorridor) {
+            offRouteCounterRef.current += 1;
+          } else {
+            offRouteCounterRef.current = 0;
+          }
+
+          // Confirmed off route only if significantly far (>80m) OR multiple consecutive updates outside corridor
+          const isConfirmedOffRoute = offDist > 80 || offRouteCounterRef.current >= 2;
+          wasSnappedRef.current = !isConfirmedOffRoute;
+
+          let displayPos: LatLng;
+          let roadHeading: number | null = null;
+
+          if (!isConfirmedOffRoute) {
+            // LOCKED TO ROUTE: snapped directly on the route line polyline to prevent lateral drifting
+            displayPos = turfResult.snappedPos;
+
+            // Stable road orientation: align along the route segment tangent at the snapped location
+            const routeTangent = getRouteHeadingAtPoint(displayPos, currentRoute.geometry);
+            if (routeTangent !== null) {
+              roadHeading = routeTangent;
+            } else if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
+              roadHeading = pos.coords.heading;
+            }
+          } else {
+            // Truly off route: display raw GPS location
+            displayPos = rawCoords;
+            if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
+              roadHeading = pos.coords.heading;
+            }
+          }
+
+          setActiveNavLocation(displayPos);
+
+          if (roadHeading !== null && !isNaN(roadHeading)) {
+            // Avoid jittery heading spinning when stopped or waiting at lights (speed <= 2 km/h)
+            if (speedKmh > 2 || currentNavHeading === null) {
+              setCurrentNavHeading(roadHeading);
+            }
+          }
+
+          setUserLocation({
+            lat: rawCoords[0],
+            lng: rawCoords[1],
+            heading: roadHeading ?? undefined,
+            speed: speedKmh,
+            accuracy: pos.coords.accuracy,
+          });
 
           // 3. Local ETA & Distance Update without API calls
           setRemainingDistance(turfResult.remainingDistanceMeters);
@@ -230,40 +255,34 @@ export function useNavigationEngine({
           setRemainingDuration(remDur);
 
           // 4. Intelligent Safe Auto-Rerouting with Turf
-          const offDist = turfResult.offRouteDistance;
           const now = Date.now();
           const canReroute = now - lastRerouteTimeRef.current > 6000 && !isReroutingRef.current;
 
-          if (offDist > 40) {
-            offRouteCounterRef.current += 1;
-            // Trigger reroute if off-route > 65m immediately OR > 40m for 2 consecutive GPS updates
-            if ((offDist > 65 || offRouteCounterRef.current >= 2) && canReroute) {
-              lastRerouteTimeRef.current = now;
-              isReroutingRef.current = true;
-              offRouteCounterRef.current = 0;
-              voiceGuidance.speak('Rerouting...', true);
-
-              calculateRoute(rawCoords, destCoords, travelModeRef.current, dest.name)
-                .then((newRoute) => {
-                  if (newRoute) {
-                    setRoute(newRoute);
-                    setCurrentStepIndex(0);
-                    currentStepIndexRef.current = 0;
-                    setRemainingDistance(newRoute.distance);
-                    setRemainingDuration(newRoute.duration);
-                    setTargetArrivalTimestamp(Date.now() + newRoute.duration * 1000);
-                    if (newRoute.steps.length > 0) {
-                      voiceGuidance.speak(newRoute.steps[0].instruction);
-                    }
-                  }
-                })
-                .catch((err) => console.warn('Auto-rerouting failed:', err))
-                .finally(() => {
-                  isReroutingRef.current = false;
-                });
-            }
-          } else {
+          if (isConfirmedOffRoute && canReroute) {
+            lastRerouteTimeRef.current = now;
+            isReroutingRef.current = true;
             offRouteCounterRef.current = 0;
+            voiceGuidance.speak('Rerouting...', true);
+
+            calculateRoute(rawCoords, destCoords, travelModeRef.current, dest.name)
+              .then((newRoute) => {
+                if (newRoute) {
+                  setRoute(newRoute);
+                  setCurrentStepIndex(0);
+                  currentStepIndexRef.current = 0;
+                  setRemainingDistance(newRoute.distance);
+                  setRemainingDuration(newRoute.duration);
+                  setTargetArrivalTimestamp(Date.now() + newRoute.duration * 1000);
+                  wasSnappedRef.current = true;
+                  if (newRoute.steps.length > 0) {
+                    voiceGuidance.speak(newRoute.steps[0].instruction);
+                  }
+                }
+              })
+              .catch((err) => console.warn('Auto-rerouting failed:', err))
+              .finally(() => {
+                isReroutingRef.current = false;
+              });
           }
 
           // 5. Turn maneuver step trigger
@@ -306,6 +325,7 @@ export function useNavigationEngine({
       setCurrentStepIndex(0);
       currentStepIndexRef.current = 0;
       offRouteCounterRef.current = 0;
+      wasSnappedRef.current = true;
       isReroutingRef.current = false;
       lastRerouteTimeRef.current = 0;
       setRemainingDistance(currentRoute.distance);

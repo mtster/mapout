@@ -244,7 +244,7 @@ export default function App() {
         onResetNorth={handleResetNorth}
         isNavigating={isNavigating}
         bearing={bearing}
-        hasActiveDestination={!!route && !isNavigating}
+        hasActiveDestination={!!selectedDestination && !isNavigating}
         isRouteSheetCollapsed={isRouteSheetCollapsed}
         isStepsOpen={isStepsOpen}
         isLayerMenuOpen={isLayerMenuOpen}
@@ -254,6 +254,7 @@ export default function App() {
       {/* Native Route Bottom Sheet */}
       <RouteBottomSheet
         route={route}
+        destination={selectedDestination}
         isLoadingRoute={isLoadingRoute}
         travelMode={travelMode}
         onChangeMode={handleChangeMode}

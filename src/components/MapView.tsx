@@ -87,6 +87,9 @@ export const MapView: React.FC<Props> = ({
   const onBearingChangeRef = useRef(onBearingChange);
   onBearingChangeRef.current = onBearingChange;
 
+  const isRouteSheetCollapsedRef = useRef(isRouteSheetCollapsed);
+  isRouteSheetCollapsedRef.current = isRouteSheetCollapsed;
+
   // 1. Initialize MapLibre GL Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -227,12 +230,12 @@ export const MapView: React.FC<Props> = ({
         if (Date.now() - lastDblClickTime < 600) return;
         if (Date.now() - lastGestureEndTime < 400) return;
 
-        if (hasDestinationRef.current) {
+        if (hasDestinationRef.current && !isRouteSheetCollapsedRef.current) {
           onMapTapWithDestinationRef.current?.();
         } else {
           onMapClickRef.current?.([clickedLat, clickedLng]);
         }
-      }, 260);
+      }, 190);
     });
 
     const handleResize = () => map.resize();

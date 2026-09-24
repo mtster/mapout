@@ -35,24 +35,32 @@ export function getOffRouteDistance(currentPos: LatLng, geometry: LatLng[]): num
 export function snapToRoute(
   currentPos: LatLng,
   geometry: LatLng[],
-  maxSnapDistanceMeters = 35
-): { snapped: LatLng; distance: number } {
+  maxSnapDistanceMeters = 65
+): { snapped: LatLng; distance: number; isSnapped: boolean; heading: number | null } {
   if (!geometry || geometry.length < 2) {
-    return { snapped: currentPos, distance: 0 };
+    return { snapped: currentPos, distance: 0, isSnapped: false, heading: null };
   }
   try {
     const pt = turf.point([currentPos[1], currentPos[0]]);
     const line = turf.lineString(geometry.map((c) => [c[1], c[0]]));
     const nearest = turf.nearestPointOnLine(line, pt, { units: 'kilometers' });
     const distMeters = Math.round((nearest.properties.dist ?? 0) * 1000);
+    const index = nearest.properties.index ?? 0;
+
+    let segmentHeading: number | null = null;
+    if (index < geometry.length - 1) {
+      segmentHeading = calculateBearing(geometry[index], geometry[index + 1]);
+    } else if (geometry.length >= 2) {
+      segmentHeading = calculateBearing(geometry[geometry.length - 2], geometry[geometry.length - 1]);
+    }
 
     if (distMeters <= maxSnapDistanceMeters) {
       const [lng, lat] = nearest.geometry.coordinates;
-      return { snapped: [lat, lng], distance: distMeters };
+      return { snapped: [lat, lng], distance: distMeters, isSnapped: true, heading: segmentHeading };
     }
-    return { snapped: currentPos, distance: distMeters };
+    return { snapped: currentPos, distance: distMeters, isSnapped: false, heading: segmentHeading };
   } catch (err) {
-    return { snapped: currentPos, distance: 0 };
+    return { snapped: currentPos, distance: 0, isSnapped: false, heading: null };
   }
 }
 

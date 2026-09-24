@@ -45,6 +45,8 @@ export function useRoutePlanner({
   // Request counter to avoid race conditions with out-of-order responses
   const routeRequestIdRef = useRef(0);
   const hasInitializedPresetRef = useRef(false);
+  const selectedDestinationRef = useRef<PlaceResult | null>(null);
+  selectedDestinationRef.current = selectedDestination;
 
   // Calculate route when destination or travel mode changes
   const fetchRoute = useCallback(
@@ -89,13 +91,18 @@ export function useRoutePlanner({
       try {
         const calculated = await calculateRoute(startPoint, destCoords, mode, destName);
         if (currentRequestId !== routeRequestIdRef.current) return;
-        setRoute(calculated);
         if (calculated) {
+          // If geocoding resolved in parallel with a real address name, adopt it
+          const currentDest = selectedDestinationRef.current;
+          if (currentDest && currentDest.name && currentDest.name !== 'Dropped Pin') {
+            calculated.destinationName = currentDest.name;
+          }
           setRemainingDistance(calculated.distance);
           setRemainingDuration(calculated.duration);
           // Lock the estimated arrival timestamp based on current time + calculated duration
           setTargetArrivalTimestamp(Date.now() + calculated.duration * 1000);
         }
+        setRoute(calculated);
       } catch (err) {
         if (currentRequestId === routeRequestIdRef.current) {
           console.error('Route calculation error:', err);
@@ -163,23 +170,49 @@ export function useRoutePlanner({
     [fetchRoute, travelMode]
   );
 
-  // User drops a pin by clicking on the map
+  // User drops a pin by clicking on the map: instant feedback with parallel calculation
   const handleMapClick = useCallback(
-    async (coords: LatLng) => {
+    (coords: LatLng) => {
       if (isNavigating) return;
 
-      const placeName = await reverseGeocode(coords[0], coords[1]);
-      const place: PlaceResult = {
-        id: `pin-${Date.now()}`,
-        name: placeName,
-        label: `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}`,
+      const pinId = `pin-${Date.now()}`;
+      const coordLabel = `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}`;
+      const initialPlace: PlaceResult = {
+        id: pinId,
+        name: 'Dropped Pin',
+        label: coordLabel,
         lat: coords[0],
         lng: coords[1],
       };
 
-      setSelectedDestination(place);
+      // 1. Immediately drop the destination pin on the map and open sheet
+      setSelectedDestination(initialPlace);
       setIsRouteSheetCollapsed(false);
-      fetchRoute(coords, placeName, travelMode);
+      setRoute(null);
+
+      // 2. Concurrently calculate route without waiting for reverse geocoding
+      fetchRoute(coords, 'Dropped Pin', travelMode);
+
+      // 3. Concurrently reverse geocode to resolve human-readable place name
+      reverseGeocode(coords[0], coords[1])
+        .then((resolvedName) => {
+          if (!resolvedName) return;
+          setSelectedDestination((prev) => {
+            if (prev && prev.id === pinId) {
+              return { ...prev, name: resolvedName };
+            }
+            return prev;
+          });
+          setRoute((prev) => {
+            if (prev && prev.endPoint[0] === coords[0] && prev.endPoint[1] === coords[1]) {
+              return { ...prev, destinationName: resolvedName };
+            }
+            return prev;
+          });
+        })
+        .catch((err) => {
+          console.warn('Reverse geocoding error:', err);
+        });
     },
     [isNavigating, fetchRoute, travelMode]
   );

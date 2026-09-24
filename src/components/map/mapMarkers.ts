@@ -16,6 +16,7 @@ interface UserMarkerAnimationState {
   startTime: number;
   duration: number;
   speed: number;
+  lastUpdateTimestamp: number;
 }
 
 const markerAnimState: UserMarkerAnimationState = {
@@ -27,6 +28,7 @@ const markerAnimState: UserMarkerAnimationState = {
   startTime: 0,
   duration: 1000,
   speed: 0,
+  lastUpdateTimestamp: 0,
 };
 
 /**
@@ -102,8 +104,19 @@ export function updateUserLocationMarker(
         markerAnimState.rafId = null;
       }
       marker.setLngLat([targetLng, targetLat]);
+      markerAnimState.lastUpdateTimestamp = 0;
     } else {
       // Navigation mode: 60 FPS continuous glide with constant speed
+      const now = performance.now();
+      const timeDelta =
+        markerAnimState.lastUpdateTimestamp > 0
+          ? now - markerAnimState.lastUpdateTimestamp
+          : 1000;
+      markerAnimState.lastUpdateTimestamp = now;
+
+      // Pacing duration adapts dynamically to device GPS interval (bounded between 500ms and 1800ms)
+      const dynamicDuration = Math.min(Math.max(timeDelta, 500), 1800);
+
       const curLngLat = marker.getLngLat();
       const currentLng = curLngLat.lng;
       const currentLat = curLngLat.lat;
@@ -112,8 +125,8 @@ export function updateUserLocationMarker(
       const dLat = targetLat - currentLat;
       const distSq = dLng * dLng + dLat * dLat;
 
-      // If position jumped dramatically (e.g. initial start, > 1km), snap directly
-      if (distSq > 0.001) {
+      // If position jumped dramatically (e.g. initial start, > 500m), snap directly
+      if (distSq > 0.0005) {
         if (markerAnimState.rafId) {
           cancelAnimationFrame(markerAnimState.rafId);
           markerAnimState.rafId = null;
@@ -123,7 +136,14 @@ export function updateUserLocationMarker(
         markerAnimState.startLat = targetLat;
         markerAnimState.targetLng = targetLng;
         markerAnimState.targetLat = targetLat;
-      } else if (distSq > 0.00000001) {
+      } else if (distSq < 0.000000005) {
+        // Less than ~0.2m movement: lock without continuous animation loop
+        if (markerAnimState.rafId) {
+          cancelAnimationFrame(markerAnimState.rafId);
+          markerAnimState.rafId = null;
+        }
+        marker.setLngLat([targetLng, targetLat]);
+      } else {
         // Start smooth constant-speed interpolation towards target
         if (markerAnimState.rafId) {
           cancelAnimationFrame(markerAnimState.rafId);
@@ -133,12 +153,12 @@ export function updateUserLocationMarker(
         markerAnimState.startLat = currentLat;
         markerAnimState.targetLng = targetLng;
         markerAnimState.targetLat = targetLat;
-        markerAnimState.startTime = performance.now();
-        markerAnimState.duration = 1000;
+        markerAnimState.startTime = now;
+        markerAnimState.duration = dynamicDuration;
         markerAnimState.speed = currentSpeed;
 
-        const animateGlide = (now: number) => {
-          const elapsed = now - markerAnimState.startTime;
+        const animateGlide = (frameTime: number) => {
+          const elapsed = frameTime - markerAnimState.startTime;
           const progress = elapsed / markerAnimState.duration;
 
           if (progress <= 1) {
@@ -148,22 +168,24 @@ export function updateUserLocationMarker(
               markerAnimState.startLat + (markerAnimState.targetLat - markerAnimState.startLat) * progress;
             marker.setLngLat([interpolatedLng, interpolatedLat]);
             markerAnimState.rafId = requestAnimationFrame(animateGlide);
-          } else if (markerAnimState.speed > 2) {
-            // Forward dead-reckoning extrapolation at constant speed if next GPS fix takes > 1.0s
-            const extraProgress = Math.min(progress - 1, 1.2);
+          } else if (markerAnimState.speed >= 5) {
+            // Forward dead-reckoning extrapolation only when actively moving (>= 5 km/h)
+            // Capped at 0.3 (300ms) with exponential velocity decay to prevent wandering off road
+            const extra = Math.min(progress - 1, 0.3);
+            const dampedExtra = extra * Math.exp(-extra * 4);
             const deltaLng = markerAnimState.targetLng - markerAnimState.startLng;
             const deltaLat = markerAnimState.targetLat - markerAnimState.startLat;
-            const extrapolatedLng = markerAnimState.targetLng + deltaLng * extraProgress;
-            const extrapolatedLat = markerAnimState.targetLat + deltaLat * extraProgress;
+            const extrapolatedLng = markerAnimState.targetLng + deltaLng * dampedExtra;
+            const extrapolatedLat = markerAnimState.targetLat + deltaLat * dampedExtra;
             marker.setLngLat([extrapolatedLng, extrapolatedLat]);
 
-            if (extraProgress < 1.2) {
+            if (extra < 0.3) {
               markerAnimState.rafId = requestAnimationFrame(animateGlide);
             } else {
               markerAnimState.rafId = null;
             }
           } else {
-            // Vehicle stopped: settle cleanly
+            // When stopped or slow (speed < 5 km/h), lock firmly at target without drifting
             marker.setLngLat([markerAnimState.targetLng, markerAnimState.targetLat]);
             markerAnimState.rafId = null;
           }
@@ -210,7 +232,7 @@ export function updateDestinationMarker(
 
   if (!destMarkerRef.current) {
     const el = document.createElement('div');
-    el.className = 'destination-marker cursor-grab active:cursor-grabbing transition-transform duration-200 hover:scale-110';
+    el.className = 'destination-marker cursor-grab active:cursor-grabbing transition-transform duration-200 hover:scale-110 animate-in fade-in zoom-in-75 duration-200';
     el.style.width = '32px';
     el.style.height = '44px';
     el.style.transformOrigin = '16px 44px'; // Strictly pivot around the needle tip
