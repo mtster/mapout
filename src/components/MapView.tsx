@@ -64,6 +64,7 @@ export const MapView: React.FC<Props> = ({
 
   const isInitialMountRef = useRef(true);
   const lastFramedDestKeyRef = useRef<string | null>(null);
+  const prevIsNavigatingRef = useRef(isNavigating);
 
   // Apply unconstrained physical dimensions on mobile viewport
   useExactViewport(mapContainerRef, mapInstanceRef);
@@ -275,7 +276,6 @@ export const MapView: React.FC<Props> = ({
   }, [mapStyle]);
 
   // 3. Update route on map and frame bounds ONLY when a new destination is selected
-  // (Prevents jarring camera bouncing when minimizing/maximizing sheet or changing vehicle types)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -291,6 +291,79 @@ export const MapView: React.FC<Props> = ({
       lastFramedDestKeyRef.current = null;
     }
   }, [route, isNavigating]);
+
+  // Re-frame the route in the safe zone above the bottom sheet whenever active navigation ends
+  useEffect(() => {
+    const wasNavigating = prevIsNavigatingRef.current;
+    prevIsNavigatingRef.current = isNavigating;
+
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (wasNavigating && !isNavigating && route) {
+      // Clear key lock so bounds can re-frame cleanly
+      lastFramedDestKeyRef.current = `${route.destinationName}-${route.endPoint[0].toFixed(5)}-${route.endPoint[1].toFixed(5)}`;
+      // Allow DOM update so RouteBottomSheet mounts and can be measured
+      setTimeout(() => {
+        if (mapInstanceRef.current && routeRef.current) {
+          fitRouteBounds(mapInstanceRef.current, routeRef.current, isRouteSheetCollapsedRef.current, 850);
+        }
+      }, 50);
+    }
+  }, [isNavigating, route]);
+
+  // Re-frame route smoothly when user toggles sheet between collapsed and expanded states
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || isNavigating || !route) return;
+    fitRouteBounds(map, route, isRouteSheetCollapsed, 450);
+  }, [isRouteSheetCollapsed]);
+
+  // ResizeObserver to automatically update camera framing when UI sheets or cards resize dynamically
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const handleUIResize = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const curMap = mapInstanceRef.current;
+        const curRoute = routeRef.current;
+        if (!curMap || !curRoute) return;
+
+        if (isNavigatingRef.current) {
+          // If in route overview mode during active navigation, re-center between top card and bottom HUD
+          const overviewBtn = document.getElementById('nav-route-overview-btn');
+          const isOverviewActive = overviewBtn?.classList.contains('text-sky-400');
+          if (isOverviewActive) {
+            fitNavRouteOverview(curMap, curRoute, 300);
+          }
+        } else {
+          // In idle/preview mode, adjust framing above the route bottom sheet
+          fitRouteBounds(curMap, curRoute, isRouteSheetCollapsedRef.current, 350);
+        }
+      }, 100);
+    };
+
+    const ro = new ResizeObserver(handleUIResize);
+
+    const routeSheet = document.getElementById('route-bottom-sheet');
+    const navTopCard = document.getElementById('nav-top-card');
+    const navBottomHud = document.getElementById('nav-bottom-hud');
+    const searchBar = document.getElementById('search-bar-container');
+
+    if (routeSheet) ro.observe(routeSheet);
+    if (navTopCard) ro.observe(navTopCard);
+    if (navBottomHud) ro.observe(navBottomHud);
+    if (searchBar) ro.observe(searchBar);
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      ro.disconnect();
+    };
+  }, [isNavigating, isRouteSheetCollapsed, route]);
 
   // 4. Render and update User Location marker with continuous 60fps constant speed interpolation
   useEffect(() => {
