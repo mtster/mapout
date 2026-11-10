@@ -8,6 +8,7 @@ import {
   calculateRemainingRouteTurf,
   snapToRoute,
   getRouteHeadingAtPoint,
+  getShortestAngleDiff,
 } from '../services/mapService';
 import { voiceGuidance } from '../utils/voiceGuidance';
 import { useWakeLock } from './useWakeLock';
@@ -72,7 +73,10 @@ export function useNavigationEngine({
   const offRouteCounterRef = useRef(0);
   const wasSnappedRef = useRef(true);
   const lastRerouteTimeRef = useRef(0);
+  const lastRerouteCoordsRef = useRef<LatLng | null>(null);
   const isReroutingRef = useRef(false);
+  const prevGpsCoordsRef = useRef<LatLng | null>(null);
+  const wrongDirectionCounterRef = useRef(0);
 
   const watchIdRef = useRef<number | null>(null);
   const simulationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -92,6 +96,9 @@ export function useNavigationEngine({
     offRouteCounterRef.current = 0;
     wasSnappedRef.current = true;
     isReroutingRef.current = false;
+    lastRerouteCoordsRef.current = null;
+    prevGpsCoordsRef.current = null;
+    wrongDirectionCounterRef.current = 0;
     voiceGuidance.stop();
 
     if (simulationTimerRef.current) {
@@ -172,7 +179,7 @@ export function useNavigationEngine({
     [travelMode, setRemainingDistance, setRemainingDuration]
   );
 
-  // Start Live GPS Tracking with Turf Snapping, Off-Route Detection & Auto-Rerouting
+  // Start Live GPS Tracking with Turf Snapping, Off-Route Detection, Wrong-Direction Detection & Auto-Rerouting
   const startGPSTracking = useCallback(() => {
     if (!navigator.geolocation) return;
 
@@ -181,6 +188,18 @@ export function useNavigationEngine({
         const rawCoords: LatLng = [pos.coords.latitude, pos.coords.longitude];
         const speedKmh = pos.coords.speed ? pos.coords.speed * 3.6 : 0;
         setCurrentSpeed(speedKmh);
+
+        // Determine actual user movement heading from GPS device sensor or delta between consecutive fixes
+        let userHeading: number | null = null;
+        if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
+          userHeading = pos.coords.heading;
+        } else if (prevGpsCoordsRef.current) {
+          const distFromPrev = calculateHaversineDistance(prevGpsCoordsRef.current, rawCoords);
+          if (distFromPrev >= 3) {
+            userHeading = calculateBearing(prevGpsCoordsRef.current, rawCoords);
+          }
+        }
+        prevGpsCoordsRef.current = rawCoords;
 
         const currentRoute = routeRef.current;
         const dest = selectedDestinationRef.current;
@@ -192,7 +211,28 @@ export function useNavigationEngine({
           const turfResult = calculateRemainingRouteTurf(rawCoords, currentRoute.geometry, destCoords);
           const offDist = turfResult.offRouteDistance;
 
-          // 2. Intelligent Route Corridor Snapping with Hysteresis
+          // 2. Road segment forward tangent at the snapped location
+          const routeTangent = getRouteHeadingAtPoint(turfResult.snappedPos, currentRoute.geometry);
+
+          // 3. Opposite / Wrong-direction detection:
+          // When user is moving at vehicle or cycling speed (>= 4.5 km/h) and traveling opposite to the route line (> 110 deg difference)
+          let isWrongDirection = false;
+          if (routeTangent !== null && userHeading !== null && speedKmh >= 4.5) {
+            const headingDiff = Math.abs(getShortestAngleDiff(userHeading, routeTangent));
+            if (headingDiff > 110) {
+              wrongDirectionCounterRef.current += 1;
+            } else {
+              wrongDirectionCounterRef.current = Math.max(0, wrongDirectionCounterRef.current - 1);
+            }
+
+            if (wrongDirectionCounterRef.current >= 2) {
+              isWrongDirection = true;
+            }
+          } else {
+            wrongDirectionCounterRef.current = 0;
+          }
+
+          // 4. Intelligent Route Corridor Snapping with Hysteresis
           // While on-route, generous 65m corridor absorbs GPS accuracy jitter and wide road lanes.
           // If recovering from off-route, requires 45m proximity to snap back.
           const snapThreshold = wasSnappedRef.current ? 65 : 45;
@@ -204,30 +244,27 @@ export function useNavigationEngine({
             offRouteCounterRef.current = 0;
           }
 
-          // Confirmed off route only if significantly far (>80m) OR multiple consecutive updates outside corridor
+          // Confirmed off route if significantly far (>80m) OR multiple consecutive updates outside corridor
           const isConfirmedOffRoute = offDist > 80 || offRouteCounterRef.current >= 2;
-          wasSnappedRef.current = !isConfirmedOffRoute;
+          wasSnappedRef.current = !isConfirmedOffRoute && !isWrongDirection;
 
           let displayPos: LatLng;
           let roadHeading: number | null = null;
 
-          if (!isConfirmedOffRoute) {
+          if (!isConfirmedOffRoute && !isWrongDirection) {
             // LOCKED TO ROUTE: snapped directly on the route line polyline to prevent lateral drifting
             displayPos = turfResult.snappedPos;
 
             // Stable road orientation: align along the route segment tangent at the snapped location
-            const routeTangent = getRouteHeadingAtPoint(displayPos, currentRoute.geometry);
             if (routeTangent !== null) {
               roadHeading = routeTangent;
-            } else if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
-              roadHeading = pos.coords.heading;
+            } else if (userHeading !== null) {
+              roadHeading = userHeading;
             }
           } else {
-            // Truly off route: display raw GPS location
+            // Truly off route or driving in wrong direction: display raw GPS location and true user travel heading
             displayPos = rawCoords;
-            if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
-              roadHeading = pos.coords.heading;
-            }
+            roadHeading = userHeading;
           }
 
           setActiveNavLocation(displayPos);
@@ -247,26 +284,37 @@ export function useNavigationEngine({
             accuracy: pos.coords.accuracy,
           });
 
-          // 3. Local ETA & Distance Update without API calls
+          // 5. Local ETA & Distance Update without API calls
           setRemainingDistance(turfResult.remainingDistanceMeters);
           const progressFraction =
             currentRoute.distance > 0 ? turfResult.remainingDistanceMeters / currentRoute.distance : 0;
           const remDur = Math.max(0, Math.round(currentRoute.duration * progressFraction));
           setRemainingDuration(remDur);
 
-          // 4. Intelligent Safe Auto-Rerouting with Turf
+          // 6. Intelligent Safe Auto-Rerouting (Anti-thrashing with distance & cooldown thresholds)
           const now = Date.now();
-          const canReroute = now - lastRerouteTimeRef.current > 6000 && !isReroutingRef.current;
+          const distSinceLastReroute = lastRerouteCoordsRef.current
+            ? calculateHaversineDistance(rawCoords, lastRerouteCoordsRef.current)
+            : 999;
 
-          if (isConfirmedOffRoute && canReroute) {
+          // Must have moved at least 25m and wait 4.5s before requesting another route to prevent infinite recalculating loops!
+          const canReroute =
+            now - lastRerouteTimeRef.current > 4500 &&
+            !isReroutingRef.current &&
+            distSinceLastReroute > 25;
+
+          if ((isConfirmedOffRoute || isWrongDirection) && canReroute) {
             lastRerouteTimeRef.current = now;
+            lastRerouteCoordsRef.current = rawCoords;
             isReroutingRef.current = true;
             offRouteCounterRef.current = 0;
+            wrongDirectionCounterRef.current = 0;
             voiceGuidance.speak('Rerouting...', true);
 
-            calculateRoute(rawCoords, destCoords, travelModeRef.current, dest.name)
+            // Pass user's current travel heading so OSRM routes in their actual direction of travel
+            calculateRoute(rawCoords, destCoords, travelModeRef.current, dest.name, userHeading)
               .then((newRoute) => {
-                if (newRoute) {
+                if (newRoute && newRoute.geometry.length > 1) {
                   setRoute(newRoute);
                   setCurrentStepIndex(0);
                   currentStepIndexRef.current = 0;
@@ -274,6 +322,7 @@ export function useNavigationEngine({
                   setRemainingDuration(newRoute.duration);
                   setTargetArrivalTimestamp(Date.now() + newRoute.duration * 1000);
                   wasSnappedRef.current = true;
+                  wrongDirectionCounterRef.current = 0;
                   if (newRoute.steps.length > 0) {
                     voiceGuidance.speak(newRoute.steps[0].instruction);
                   }
@@ -285,7 +334,7 @@ export function useNavigationEngine({
               });
           }
 
-          // 5. Turn maneuver step trigger
+          // 7. Turn maneuver step trigger
           currentRoute.steps.forEach((step, idx) => {
             const dist = calculateHaversineDistance(rawCoords, step.location);
             if (dist < 40 && idx > currentStepIndexRef.current) {
@@ -295,7 +344,7 @@ export function useNavigationEngine({
             }
           });
 
-          // 6. Arrival check
+          // 8. Arrival check
           if (turfResult.remainingDistanceMeters < 25) {
             voiceGuidance.speak(`You have arrived at ${currentRoute.destinationName}`, true);
             stopNavigation();
@@ -328,6 +377,9 @@ export function useNavigationEngine({
       wasSnappedRef.current = true;
       isReroutingRef.current = false;
       lastRerouteTimeRef.current = 0;
+      lastRerouteCoordsRef.current = null;
+      prevGpsCoordsRef.current = null;
+      wrongDirectionCounterRef.current = 0;
       setRemainingDistance(currentRoute.distance);
       setRemainingDuration(currentRoute.duration);
 

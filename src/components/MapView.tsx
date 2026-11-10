@@ -73,6 +73,9 @@ export const MapView: React.FC<Props> = ({
   const isNavigatingRef = useRef(isNavigating);
   isNavigatingRef.current = isNavigating;
 
+  const activeNavLocationRef = useRef(activeNavLocation);
+  activeNavLocationRef.current = activeNavLocation;
+
   const hasDestinationRef = useRef(hasDestination);
   hasDestinationRef.current = hasDestination;
 
@@ -130,11 +133,11 @@ export const MapView: React.FC<Props> = ({
       setTimeout(() => map.resize(), 100);
       setTimeout(() => map.resize(), 500);
       onMapReady?.(map);
-      updateRouteLayer(map, routeRef.current);
+      updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
     });
 
     map.on('style.load', () => {
-      updateRouteLayer(map, routeRef.current);
+      updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
     });
 
     map.on('rotate', () => {
@@ -146,7 +149,7 @@ export const MapView: React.FC<Props> = ({
       if (map.isStyleLoaded() && routeRef.current) {
         const sourceId = 'active-route-source';
         if (!map.getSource(sourceId)) {
-          updateRouteLayer(map, routeRef.current);
+          updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
         }
       }
     });
@@ -279,7 +282,7 @@ export const MapView: React.FC<Props> = ({
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
-    updateRouteLayer(map, route);
+    updateRouteLayer(map, route, isNavigating, activeNavLocation);
 
     if (route && !isNavigating) {
       const destKey = `${route.destinationName}-${route.endPoint[0].toFixed(5)}-${route.endPoint[1].toFixed(5)}`;
@@ -290,7 +293,7 @@ export const MapView: React.FC<Props> = ({
     } else if (!route) {
       lastFramedDestKeyRef.current = null;
     }
-  }, [route, isNavigating]);
+  }, [route, isNavigating, activeNavLocation]);
 
   // Re-frame the route in the safe zone above the bottom sheet whenever active navigation ends
   useEffect(() => {
@@ -338,7 +341,7 @@ export const MapView: React.FC<Props> = ({
           const overviewBtn = document.getElementById('nav-route-overview-btn');
           const isOverviewActive = overviewBtn?.classList.contains('text-sky-400');
           if (isOverviewActive) {
-            fitNavRouteOverview(curMap, curRoute, 300);
+            fitNavRouteOverview(curMap, curRoute, activeNavLocationRef.current, 300);
           }
         } else {
           // In idle/preview mode, adjust framing above the route bottom sheet
@@ -410,7 +413,8 @@ export const MapView: React.FC<Props> = ({
     const map = mapInstanceRef.current;
     if (!map || !isNavigating || !route || !isRouteOverview) return;
 
-    fitNavRouteOverview(map, route);
+    const currentLoc = activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
+    fitNavRouteOverview(map, route, currentLoc);
   }, [isRouteOverview, isNavigating, route]);
 
   // 8. Recenter trigger

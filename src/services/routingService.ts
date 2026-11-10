@@ -6,13 +6,19 @@ export async function calculateRoute(
   start: LatLng,
   end: LatLng,
   mode: TravelMode = 'driving',
-  destinationName = 'Destination'
+  destinationName = 'Destination',
+  startBearing?: number | null
 ): Promise<RouteData | null> {
   // Use OpenStreetMap dedicated routing profiles for authentic vehicle routing
   // routed-car for driving, routed-bike for cycling paths, routed-foot for pedestrian paths
   const osmProfile = mode === 'cycling' ? 'routed-bike' : mode === 'walking' ? 'routed-foot' : 'routed-car';
-  const primaryUrl = `https://routing.openstreetmap.de/${osmProfile}/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
-  const fallbackUrl = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+  const bearingParam =
+    typeof startBearing === 'number' && !isNaN(startBearing)
+      ? `&bearings=${Math.round(((startBearing % 360) + 360) % 360)},60;`
+      : '';
+
+  const primaryUrl = `https://routing.openstreetmap.de/${osmProfile}/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true${bearingParam}`;
+  const fallbackUrl = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true${bearingParam}`;
 
   try {
     let res: Response;
@@ -21,9 +27,19 @@ export async function calculateRoute(
       res = await fetch(primaryUrl);
       if (!res.ok) throw new Error('Primary routing error');
     } catch {
-      // Fallback to project-osrm driving endpoint
-      res = await fetch(fallbackUrl);
-      isFallback = true;
+      try {
+        // Fallback to project-osrm driving endpoint
+        res = await fetch(fallbackUrl);
+        isFallback = true;
+      } catch {
+        // If bearing was constrained and failed, retry primary without bearing constraint
+        if (bearingParam) {
+          const unconstrainedUrl = `https://routing.openstreetmap.de/${osmProfile}/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+          res = await fetch(unconstrainedUrl);
+        } else {
+          throw new Error('Routing endpoints unreachable');
+        }
+      }
     }
 
     if (!res.ok) {

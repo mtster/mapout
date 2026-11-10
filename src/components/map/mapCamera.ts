@@ -35,9 +35,9 @@ export function getScreenSafePadding(
     const topCard = document.getElementById('nav-top-card');
     if (topCard) {
       const rect = topCard.getBoundingClientRect();
-      topInset = Math.round(rect.bottom);
+      topInset = rect.bottom > 20 && rect.bottom < containerH * 0.5 ? Math.round(rect.bottom) : 140;
     } else {
-      topInset = Math.round(containerH * 0.24);
+      topInset = 140;
     }
     // Safe margin so top of route doesn't touch the maneuver card
     topInset += 20;
@@ -46,15 +46,16 @@ export function getScreenSafePadding(
     const bottomHud = document.getElementById('nav-bottom-hud');
     if (bottomHud) {
       const rect = bottomHud.getBoundingClientRect();
-      bottomInset = Math.round(containerH - rect.top);
+      const measuredBottom = Math.round(containerH - rect.top);
+      bottomInset = measuredBottom > 20 && measuredBottom < containerH * 0.5 ? measuredBottom : 110;
     } else {
-      bottomInset = Math.round(containerH * 0.18);
+      bottomInset = 110;
     }
     // Safe margin so bottom of route doesn't touch the navigation HUD
     bottomInset += 20;
 
     // Right side margin to clear floating re-center / next step buttons
-    rightInset = Math.max(rightInset, 64);
+    rightInset = Math.max(rightInset, 72);
   } else {
     // 1. Top Obstruction: Search Bar (#search-bar-container)
     const searchBar = document.getElementById('search-bar-container');
@@ -136,11 +137,26 @@ export function fitRouteBounds(
   const container = map.getContainer();
   const padding = getScreenSafePadding(container, false, isRouteSheetCollapsed);
 
-  // Normalize pitch and bearing to 0 to eliminate 3D perspective distortion
+  // Normalize pitch and bearing on transform to 0 during bounding box calculation
+  // to avoid perspective projection distortion
+  const transform = (map as any).transform;
+  const origPitch = transform ? transform.pitch : map.getPitch();
+  const origBearing = transform ? transform.bearing : map.getBearing();
+
+  if (transform) {
+    transform.pitch = 0;
+    transform.bearing = 0;
+  }
+
   const targetCamera = map.cameraForBounds(bounds, {
     padding,
     maxZoom: 16.5,
   });
+
+  if (transform) {
+    transform.pitch = origPitch;
+    transform.bearing = origBearing;
+  }
 
   if (targetCamera && targetCamera.center && typeof targetCamera.zoom === 'number') {
     map.easeTo({
@@ -162,6 +178,7 @@ export function fitRouteBounds(
 export function fitNavRouteOverview(
   map: MapLibreMap,
   route: RouteData,
+  currentLocation?: LatLng | null,
   duration = 750
 ) {
   if (!route.geometry || route.geometry.length < 2) return;
@@ -170,18 +187,38 @@ export function fitNavRouteOverview(
   route.geometry.forEach((pt) => {
     bounds.extend([pt[1], pt[0]]);
   });
+  if (currentLocation) {
+    bounds.extend([currentLocation[1], currentLocation[0]]);
+  }
 
   const container = map.getContainer();
   const padding = getScreenSafePadding(container, true);
 
-  // CRITICAL PITCH NORMALIZATION:
-  // Reset pitch to 0 and bearing to 0. During navigation, pitch is 48 deg.
-  // Normalizing pitch to 0 removes 3D tilt perspective distortion, perfectly centering the route
-  // between the upper navigation card and the lower navigation HUD without clipping!
+  // CRITICAL PITCH & BEARING NORMALIZATION:
+  // When pitch is 48 degrees, map.cameraForBounds projects bounds onto a 3D perspective frustum.
+  // This causes cameraForBounds to calculate an extremely low zoom (zoomed out way too much)
+  // and shifts the center down towards the bottom of the screen.
+  // By temporarily setting transform.pitch and transform.bearing to 0, cameraForBounds
+  // calculates the true 2D bounding box and center perfectly centered between the top card and bottom HUD.
+  const transform = (map as any).transform;
+  const origPitch = transform ? transform.pitch : map.getPitch();
+  const origBearing = transform ? transform.bearing : map.getBearing();
+
+  if (transform) {
+    transform.pitch = 0;
+    transform.bearing = 0;
+  }
+
   const targetCamera = map.cameraForBounds(bounds, {
     padding,
-    maxZoom: 16.2,
+    maxZoom: 16.5,
   });
+
+  // Restore current transform pitch and bearing so easeTo smoothly animates from current orientation to 0
+  if (transform) {
+    transform.pitch = origPitch;
+    transform.bearing = origBearing;
+  }
 
   if (targetCamera && targetCamera.center && typeof targetCamera.zoom === 'number') {
     map.easeTo({

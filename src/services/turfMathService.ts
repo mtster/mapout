@@ -150,3 +150,68 @@ export function getRouteHeadingAtPoint(currentPos: LatLng, geometry: LatLng[]): 
     return null;
   }
 }
+
+/**
+ * Splits a route polyline into two segments at the given current user/marker coordinate:
+ * - passed: from route origin up to current position (rendered paled/grayed out)
+ * - remaining: from current position to route destination (rendered vibrant active)
+ */
+export function splitRouteGeometry(
+  currentPos: LatLng | null,
+  geometry: LatLng[]
+): {
+  passed: LatLng[];
+  remaining: LatLng[];
+} {
+  if (!geometry || geometry.length < 2) {
+    return { passed: [], remaining: geometry || [] };
+  }
+  if (!currentPos) {
+    return { passed: [], remaining: geometry };
+  }
+
+  try {
+    const pt = turf.point([currentPos[1], currentPos[0]]);
+    const line = turf.lineString(geometry.map((c) => [c[1], c[0]]));
+    const nearest = turf.nearestPointOnLine(line, pt, { units: 'kilometers' });
+
+    const nearestCoords = nearest.geometry.coordinates; // [lng, lat]
+    const nearestIdx = nearest.properties.index ?? 0;
+
+    // If near the very start of the route (< 15 meters and at index 0)
+    const distToStart = calculateHaversineDistance(currentPos, geometry[0]);
+    if (nearestIdx === 0 && distToStart < 15) {
+      return { passed: [], remaining: geometry };
+    }
+
+    // If near the very end of the route
+    const distToEnd = calculateHaversineDistance(currentPos, geometry[geometry.length - 1]);
+    if (nearestIdx >= geometry.length - 2 && distToEnd < 15) {
+      return { passed: geometry, remaining: [] };
+    }
+
+    const startPt = turf.point([geometry[0][1], geometry[0][0]]);
+    const snappedPt = turf.point(nearestCoords);
+    const endPt = turf.point([geometry[geometry.length - 1][1], geometry[geometry.length - 1][0]]);
+
+    // turf.lineSlice creates sub-lineStrings
+    const passedSlice = turf.lineSlice(startPt, snappedPt, line);
+    const remainingSlice = turf.lineSlice(snappedPt, endPt, line);
+
+    const passedCoords: LatLng[] = passedSlice.geometry.coordinates.map(
+      (c: [number, number]) => [c[1], c[0]] as LatLng
+    );
+    const remainingCoords: LatLng[] = remainingSlice.geometry.coordinates.map(
+      (c: [number, number]) => [c[1], c[0]] as LatLng
+    );
+
+    return {
+      passed: passedCoords,
+      remaining: remainingCoords,
+    };
+  } catch (err) {
+    console.warn('Error splitting route geometry:', err);
+    return { passed: [], remaining: geometry };
+  }
+}
+
