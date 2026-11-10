@@ -6,6 +6,7 @@ import { useExactViewport } from '../hooks/useExactViewport';
 import {
   MAP_STYLES,
   updateRouteLayer,
+  updateStreetLighting,
   updateUserLocationMarker,
   updateDestinationMarker,
   fitRouteBounds,
@@ -76,6 +77,9 @@ export const MapView: React.FC<Props> = ({
   const activeNavLocationRef = useRef(activeNavLocation);
   activeNavLocationRef.current = activeNavLocation;
 
+  const mapStyleRef = useRef(mapStyle);
+  mapStyleRef.current = mapStyle;
+
   const hasDestinationRef = useRef(hasDestination);
   hasDestinationRef.current = hasDestination;
 
@@ -134,22 +138,28 @@ export const MapView: React.FC<Props> = ({
       setTimeout(() => map.resize(), 500);
       onMapReady?.(map);
       updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
+      updateStreetLighting(map, routeRef.current, mapStyleRef.current);
     });
 
     map.on('style.load', () => {
       updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
+      updateStreetLighting(map, routeRef.current, mapStyleRef.current);
     });
 
     map.on('rotate', () => {
       onBearingChangeRef.current?.(map.getBearing());
     });
 
-    // Re-apply route after style changes
+    // Re-apply route and ambient lights after style changes
     map.on('styledata', () => {
       if (map.isStyleLoaded() && routeRef.current) {
         const sourceId = 'active-route-source';
         if (!map.getSource(sourceId)) {
           updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
+        }
+        const lightsSourceId = 'street-lights-source';
+        if (!map.getSource(lightsSourceId)) {
+          updateStreetLighting(map, routeRef.current, mapStyleRef.current);
         }
       }
     });
@@ -283,6 +293,7 @@ export const MapView: React.FC<Props> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
     updateRouteLayer(map, route, isNavigating, activeNavLocation);
+    updateStreetLighting(map, route, mapStyle);
 
     if (route && !isNavigating) {
       const destKey = `${route.destinationName}-${route.endPoint[0].toFixed(5)}-${route.endPoint[1].toFixed(5)}`;
@@ -293,7 +304,7 @@ export const MapView: React.FC<Props> = ({
     } else if (!route) {
       lastFramedDestKeyRef.current = null;
     }
-  }, [route, isNavigating, activeNavLocation]);
+  }, [route, isNavigating, activeNavLocation, mapStyle]);
 
   // Re-frame the route in the safe zone above the bottom sheet whenever active navigation ends
   useEffect(() => {

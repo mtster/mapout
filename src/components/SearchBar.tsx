@@ -38,6 +38,7 @@ export const SearchBar: React.FC<Props> = ({
   const [hasInteracted, setHasInteracted] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeqRef = useRef(0);
 
   const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
   const setIsOpen = (open: boolean) => {
@@ -65,12 +66,14 @@ export const SearchBar: React.FC<Props> = ({
     }
   }, [selectedDestination]);
 
-  // Debounced search with proximity distance-decay prioritization
+  // Debounced search with sequence tracking: cancels prior timers on every keystroke
+  // and only triggers network search after user pauses typing for 380ms
   useEffect(() => {
     if (!hasInteracted) return;
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
 
     const trimmed = query.trim();
@@ -80,20 +83,28 @@ export const SearchBar: React.FC<Props> = ({
       return;
     }
 
-    setIsSearching(true);
     debounceTimerRef.current = setTimeout(async () => {
+      const currentSeq = ++searchSeqRef.current;
+      setIsSearching(true);
       try {
         const places = await searchPlaces(trimmed, userLocationRef.current || undefined);
-        setResults(places);
+        if (currentSeq === searchSeqRef.current) {
+          setResults(places);
+        }
       } catch (err) {
         console.error('Search error:', err);
       } finally {
-        setIsSearching(false);
+        if (currentSeq === searchSeqRef.current) {
+          setIsSearching(false);
+        }
       }
-    }, 300);
+    }, 380);
 
     return () => {
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
     };
   }, [query, hasInteracted]);
 

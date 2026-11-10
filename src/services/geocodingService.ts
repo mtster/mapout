@@ -88,15 +88,50 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
         data.features.forEach((feat: any, index: number) => {
           const props = feat.properties || {};
           const coords = feat.geometry?.coordinates || [0, 0];
-          const name = props.name || props.street || props.city || trimmed;
-          const details = [props.street, props.city, props.state, props.country]
-            .filter(Boolean)
-            .join(', ');
+
+          const housenumber = props.housenumber ? String(props.housenumber).trim() : '';
+          const street = props.street ? String(props.street).trim() : '';
+          const rawName = props.name ? String(props.name).trim() : '';
+
+          let name = '';
+          let label = '';
+
+          if (housenumber && street) {
+            const queryStartsWithNumber = /^\d+/.test(trimmed);
+            const streetWithNumber = queryStartsWithNumber
+              ? `${housenumber}, ${street}`
+              : `${street} ${housenumber}`;
+
+            if (rawName && rawName.toLowerCase() !== street.toLowerCase()) {
+              name = rawName;
+              label = [streetWithNumber, props.district || props.suburb, props.city, props.country]
+                .filter(Boolean)
+                .join(', ');
+            } else {
+              name = streetWithNumber;
+              label = [props.district || props.suburb, props.city, props.state, props.country]
+                .filter(Boolean)
+                .join(', ');
+            }
+          } else if (rawName) {
+            name = housenumber && !rawName.includes(housenumber) ? `${rawName} ${housenumber}` : rawName;
+            label = [street, props.district || props.suburb, props.city, props.country]
+              .filter(Boolean)
+              .join(', ');
+          } else if (street) {
+            name = housenumber ? `${street} ${housenumber}` : street;
+            label = [props.district || props.suburb, props.city, props.state, props.country]
+              .filter(Boolean)
+              .join(', ');
+          } else {
+            name = housenumber ? `${props.city || trimmed} ${housenumber}` : (props.city || trimmed);
+            label = [props.state, props.country].filter(Boolean).join(', ');
+          }
 
           rawCandidates.push({
             id: `photon-${props.osm_id || index}-${coords[0]}`,
             name,
-            label: details || name,
+            label: label || name,
             lat: coords[1],
             lng: coords[0],
             category: props.osm_value || props.type || 'place',
@@ -140,7 +175,40 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
           nomData.forEach((item: any) => {
             const lat = parseFloat(item.lat);
             const lng = parseFloat(item.lon);
-            const name = item.name || item.display_name.split(',')[0];
+            const addr = item.address || {};
+            const houseNum = addr.house_number ? String(addr.house_number).trim() : '';
+            const road = addr.road || addr.street || addr.pedestrian || '';
+            const rawNomName = item.name || '';
+
+            let name = '';
+            if (houseNum && road) {
+              const queryStartsWithNumber = /^\d+/.test(trimmed);
+              const streetWithNumber = queryStartsWithNumber
+                ? `${houseNum}, ${road}`
+                : `${road} ${houseNum}`;
+
+              if (rawNomName && rawNomName !== houseNum && rawNomName.toLowerCase() !== road.toLowerCase()) {
+                name = rawNomName;
+              } else {
+                name = streetWithNumber;
+              }
+            } else if (rawNomName && rawNomName !== houseNum) {
+              name = houseNum && !rawNomName.includes(houseNum) ? `${rawNomName} ${houseNum}` : rawNomName;
+            } else if (road) {
+              name = houseNum ? `${road} ${houseNum}` : road;
+            } else {
+              name = item.display_name.split(',')[0];
+              if (houseNum && !name.includes(houseNum)) {
+                name = `${houseNum}, ${name}`;
+              }
+            }
+
+            const labelParts = [
+              addr.suburb || addr.quarter || addr.neighbourhood,
+              addr.city || addr.town || addr.village,
+              addr.country,
+            ].filter(Boolean);
+            const label = labelParts.length > 0 ? labelParts.join(', ') : item.display_name;
 
             // Avoid adding identical duplicates
             const isDup = rawCandidates.some(
@@ -151,7 +219,7 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
               rawCandidates.push({
                 id: `nom-${item.place_id}`,
                 name,
-                label: item.display_name,
+                label,
                 lat,
                 lng,
                 category: item.type || item.class || 'place',
@@ -217,7 +285,12 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
       const data = await res.json();
       if (data?.features?.[0]?.properties) {
         const p = data.features[0].properties;
-        const parts = [p.name, p.street, p.city, p.country].filter(Boolean);
+        const streetWithNumber = p.street
+          ? p.housenumber
+            ? `${p.street} ${p.housenumber}`
+            : p.street
+          : null;
+        const parts = [p.name, streetWithNumber, p.district || p.city, p.country].filter(Boolean);
         if (parts.length > 0) return parts.slice(0, 3).join(', ');
       }
     }
@@ -227,11 +300,18 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
 
   try {
     const nomRes = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
       { headers: { 'User-Agent': 'Mapout-PWA-App' } }
     );
     if (nomRes.ok) {
       const data = await nomRes.json();
+      const addr = data.address || {};
+      const houseNum = addr.house_number;
+      const road = addr.road || addr.street;
+      if (houseNum && road) {
+        const parts = [`${road} ${houseNum}`, addr.city || addr.town, addr.country].filter(Boolean);
+        return parts.join(', ');
+      }
       if (data?.display_name) {
         return data.display_name.split(',').slice(0, 3).join(',').trim();
       }
@@ -242,3 +322,4 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
 
   return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 }
+
