@@ -119,7 +119,7 @@ export function getScreenSafePadding(
 
 /**
  * Frames the route within the visible viewport above the route bottom sheet in a single smooth, direct motion.
- * Uses cameraForBounds + easeTo with dynamic safe padding and pitch normalization (pitch: 0, bearing: 0).
+ * Uses cameraForBounds + easeTo with dynamic safe padding and pitch/padding normalization.
  */
 export function fitRouteBounds(
   map: MapLibreMap,
@@ -137,15 +137,17 @@ export function fitRouteBounds(
   const container = map.getContainer();
   const padding = getScreenSafePadding(container, false, isRouteSheetCollapsed);
 
-  // Normalize pitch and bearing on transform to 0 during bounding box calculation
-  // to avoid perspective projection distortion
+  // Normalize pitch, bearing, and padding on transform to 0 during bounding box calculation
+  // to avoid perspective projection distortion and additive padding compounding
   const transform = (map as any).transform;
   const origPitch = transform ? transform.pitch : map.getPitch();
   const origBearing = transform ? transform.bearing : map.getBearing();
+  const origPadding = transform ? { ...transform.padding } : { top: 0, bottom: 0, left: 0, right: 0 };
 
   if (transform) {
     transform.pitch = 0;
     transform.bearing = 0;
+    transform.padding = { top: 0, bottom: 0, left: 0, right: 0 };
   }
 
   const targetCamera = map.cameraForBounds(bounds, {
@@ -156,6 +158,7 @@ export function fitRouteBounds(
   if (transform) {
     transform.pitch = origPitch;
     transform.bearing = origBearing;
+    transform.padding = origPadding;
   }
 
   if (targetCamera && targetCamera.center && typeof targetCamera.zoom === 'number') {
@@ -164,6 +167,7 @@ export function fitRouteBounds(
       zoom: targetCamera.zoom,
       bearing: 0,
       pitch: 0,
+      padding: { top: 0, bottom: 0, left: 0, right: 0 },
       duration,
       easing: (t) => 1 - Math.pow(1 - t, 3), // Smooth cubic ease-out
     });
@@ -173,7 +177,7 @@ export function fitRouteBounds(
 /**
  * Frames the entire route overview during active turn-by-turn navigation.
  * Centers the route cleanly in the unobstructed safe zone between the upper navigation card
- * and the bottom navigation HUD, resetting pitch to 0 to prevent 3D tilt perspective distortion.
+ * and the bottom navigation HUD, resetting pitch and transform padding to 0.
  */
 export function fitNavRouteOverview(
   map: MapLibreMap,
@@ -194,19 +198,22 @@ export function fitNavRouteOverview(
   const container = map.getContainer();
   const padding = getScreenSafePadding(container, true);
 
-  // CRITICAL PITCH & BEARING NORMALIZATION:
-  // When pitch is 48 degrees, map.cameraForBounds projects bounds onto a 3D perspective frustum.
-  // This causes cameraForBounds to calculate an extremely low zoom (zoomed out way too much)
-  // and shifts the center down towards the bottom of the screen.
-  // By temporarily setting transform.pitch and transform.bearing to 0, cameraForBounds
-  // calculates the true 2D bounding box and center perfectly centered between the top card and bottom HUD.
+  // CRITICAL PITCH & PADDING NORMALIZATION:
+  // During navigation, followNavigationCamera sets transform.pitch = 48 and transform.padding.top = ~450px!
+  // If not reset, MapLibre's cameraForBounds adds the 450px top padding ON TOP of the safe padding,
+  // causing the camera to compute a tiny usable height, zooming out to space and pushing the route
+  // down to the very bottom of the screen.
+  // By clearing transform pitch, bearing, and padding before cameraForBounds and easing to padding: 0,
+  // the route is calculated with the true safe viewport and centered squarely between the top card and HUD.
   const transform = (map as any).transform;
   const origPitch = transform ? transform.pitch : map.getPitch();
   const origBearing = transform ? transform.bearing : map.getBearing();
+  const origPadding = transform ? { ...transform.padding } : { top: 0, bottom: 0, left: 0, right: 0 };
 
   if (transform) {
     transform.pitch = 0;
     transform.bearing = 0;
+    transform.padding = { top: 0, bottom: 0, left: 0, right: 0 };
   }
 
   const targetCamera = map.cameraForBounds(bounds, {
@@ -214,10 +221,11 @@ export function fitNavRouteOverview(
     maxZoom: 16.5,
   });
 
-  // Restore current transform pitch and bearing so easeTo smoothly animates from current orientation to 0
+  // Restore transform so easeTo animates smoothly from current 3D position
   if (transform) {
     transform.pitch = origPitch;
     transform.bearing = origBearing;
+    transform.padding = origPadding;
   }
 
   if (targetCamera && targetCamera.center && typeof targetCamera.zoom === 'number') {
@@ -226,6 +234,7 @@ export function fitNavRouteOverview(
       zoom: targetCamera.zoom,
       bearing: 0,
       pitch: 0,
+      padding: { top: 0, bottom: 0, left: 0, right: 0 },
       duration,
       easing: (t) => 1 - Math.pow(1 - t, 3), // Smooth cubic ease-out
     });

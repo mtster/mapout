@@ -95,20 +95,23 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
 
           let name = '';
           let label = '';
+          let isDirectAddress = false;
 
           if (housenumber && street) {
             const queryStartsWithNumber = /^\d+/.test(trimmed);
+            // Format without comma as requested (e.g. "24 ilia chavchavadze")
             const streetWithNumber = queryStartsWithNumber
-              ? `${housenumber}, ${street}`
+              ? `${housenumber} ${street}`
               : `${street} ${housenumber}`;
 
-            if (rawName && rawName.toLowerCase() !== street.toLowerCase()) {
+            if (rawName && rawName.toLowerCase() !== street.toLowerCase() && rawName !== housenumber) {
               name = rawName;
               label = [streetWithNumber, props.district || props.suburb, props.city, props.country]
                 .filter(Boolean)
                 .join(', ');
             } else {
               name = streetWithNumber;
+              isDirectAddress = true;
               label = [props.district || props.suburb, props.city, props.state, props.country]
                 .filter(Boolean)
                 .join(', ');
@@ -120,6 +123,7 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
               .join(', ');
           } else if (street) {
             name = housenumber ? `${street} ${housenumber}` : street;
+            isDirectAddress = Boolean(housenumber);
             label = [props.district || props.suburb, props.city, props.state, props.country]
               .filter(Boolean)
               .join(', ');
@@ -134,7 +138,7 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
             label: label || name,
             lat: coords[1],
             lng: coords[0],
-            category: props.osm_value || props.type || 'place',
+            category: isDirectAddress ? 'address' : (props.osm_value || props.type || 'place'),
             city: props.city,
             country: props.country,
           });
@@ -178,28 +182,33 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
             const addr = item.address || {};
             const houseNum = addr.house_number ? String(addr.house_number).trim() : '';
             const road = addr.road || addr.street || addr.pedestrian || '';
-            const rawNomName = item.name || '';
+            const rawNomName = item.name ? String(item.name).trim() : '';
 
             let name = '';
+            let isDirectAddress = false;
+
             if (houseNum && road) {
               const queryStartsWithNumber = /^\d+/.test(trimmed);
+              // Format without comma as requested (e.g. "24 ilia chavchavadze")
               const streetWithNumber = queryStartsWithNumber
-                ? `${houseNum}, ${road}`
+                ? `${houseNum} ${road}`
                 : `${road} ${houseNum}`;
 
               if (rawNomName && rawNomName !== houseNum && rawNomName.toLowerCase() !== road.toLowerCase()) {
                 name = rawNomName;
               } else {
                 name = streetWithNumber;
+                isDirectAddress = true;
               }
             } else if (rawNomName && rawNomName !== houseNum) {
               name = houseNum && !rawNomName.includes(houseNum) ? `${rawNomName} ${houseNum}` : rawNomName;
             } else if (road) {
               name = houseNum ? `${road} ${houseNum}` : road;
+              isDirectAddress = Boolean(houseNum);
             } else {
               name = item.display_name.split(',')[0];
               if (houseNum && !name.includes(houseNum)) {
-                name = `${houseNum}, ${name}`;
+                name = `${houseNum} ${name}`;
               }
             }
 
@@ -222,7 +231,7 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
                 label,
                 lat,
                 lng,
-                category: item.type || item.class || 'place',
+                category: isDirectAddress ? 'address' : (item.type || item.class || 'place'),
                 city: item.address?.city || item.address?.town || item.address?.village,
                 country: item.address?.country,
               });
@@ -237,7 +246,10 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
 
   if (rawCandidates.length === 0) return [];
 
-  // 3. Apply Distance Decay Ranking Mechanism
+  // Check if query is looking for a specific address/building number
+  const queryHasNumber = /\b\d+\b/.test(trimmed);
+
+  // 3. Apply Distance Decay Ranking Mechanism with Address Match Priority
   const scoredResults = rawCandidates.map((place) => {
     let distanceMeters: number | undefined = undefined;
     let decayFactor = 1.0;
@@ -248,7 +260,17 @@ export async function searchPlaces(query: string, userCoords?: LatLng): Promise<
       decayFactor = calculateDistanceDecay(distKm);
     }
 
-    const textScore = calculateTextRelevance(trimmed, place.name, place.label, place.category);
+    let textScore = calculateTextRelevance(trimmed, place.name, place.label, place.category);
+
+    // If user searched for a specific building number and this candidate is the direct address itself,
+    // give it highest ranking priority over venues located at that address!
+    if (queryHasNumber) {
+      if (place.category === 'address') {
+        textScore += 45; // Direct address matches top the list
+      } else if (place.category === 'house' || place.category === 'apartments' || place.category === 'building') {
+        textScore += 35;
+      }
+    }
 
     // Global floor for major cities/regions so international capital searches still work
     const isMajorCity =

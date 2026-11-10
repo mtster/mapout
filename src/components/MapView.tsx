@@ -244,11 +244,14 @@ export const MapView: React.FC<Props> = ({
         if (Date.now() - lastDblClickTime < 600) return;
         if (Date.now() - lastGestureEndTime < 400) return;
 
-        if (hasDestinationRef.current && !isRouteSheetCollapsedRef.current) {
+        if (hasDestinationRef.current) {
+          // A destination is picked: clicking the map NEVER rechooses another destination!
+          // As requested, it can only be cancelled by the X close button in the bottom navigation info sheet.
           onMapTapWithDestinationRef.current?.();
-        } else {
-          onMapClickRef.current?.([clickedLat, clickedLng]);
+          return;
         }
+
+        onMapClickRef.current?.([clickedLat, clickedLng]);
       }, 190);
     });
 
