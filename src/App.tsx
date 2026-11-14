@@ -61,6 +61,7 @@ export default function App() {
     isCenteredOnUser,
     setIsCenteredOnUser,
     handleLocateClick,
+    setIsNavigationActive,
   } = useUserLocation(mapInstance);
 
   // Forward declaration ref for stopNavigation to break circular dependency with route planner
@@ -107,6 +108,7 @@ export default function App() {
     currentStepIndex,
     currentSpeed,
     activeNavLocation,
+    activeNavRouteDist,
     isVoiceEnabled,
     handleStartNavigation,
     stopNavigation,
@@ -130,6 +132,10 @@ export default function App() {
   });
 
   stopNavRef.current = stopNavigation;
+
+  useEffect(() => {
+    setIsNavigationActive(isNavigating);
+  }, [isNavigating, setIsNavigationActive]);
 
   // Reset map rotation back to standard North orientation (bearing = 0)
   const handleResetNorth = useCallback(() => {
@@ -183,6 +189,7 @@ export default function App() {
         mapStyle={mapStyle}
         isNavigating={isNavigating}
         activeNavLocation={activeNavLocation}
+        activeNavRouteDist={activeNavRouteDist}
         hasDestination={!!selectedDestination}
         onMapClick={handleMapClickIntercepted}
         onMapTapWithDestination={handleMapTapWithDestinationIntercepted}

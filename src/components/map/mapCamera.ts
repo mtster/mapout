@@ -249,7 +249,8 @@ export function followNavigationCamera(
   map: MapLibreMap,
   targetCoord: LatLng,
   targetHeading: number | null | undefined,
-  standardNavZoom: number
+  standardNavZoom: number,
+  durationMs = 1000
 ) {
   const currentBearing = map.getBearing();
   let bearingToUse = currentBearing;
@@ -267,7 +268,7 @@ export function followNavigationCamera(
     bearing: bearingToUse,
     pitch: 48,
     padding: { top: navTopPadding, bottom: 0, left: 0, right: 0 },
-    duration: 1000,
+    duration: durationMs,
     easing: (t) => t, // Constant velocity linear pacing
   });
 }

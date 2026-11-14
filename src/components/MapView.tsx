@@ -1,13 +1,17 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback } from 'react';
 import { Map as MapLibreMap, Marker } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LatLng, MapStyle, RouteData, UserLocation } from '../types';
 import { useExactViewport } from '../hooks/useExactViewport';
+import { buildIndexedRoute, IndexedRoute } from '../services/turfMathService';
 import {
   MAP_STYLES,
   updateRouteLayer,
   updateStreetLighting,
   updateUserLocationMarker,
+  syncUserMarkerHeadingRotation,
+  getVisualMarkerState,
+  getMarkerGlideDuration,
   updateDestinationMarker,
   fitRouteBounds,
   fitNavRouteOverview,
@@ -22,6 +26,7 @@ interface Props {
   mapStyle: MapStyle;
   isNavigating: boolean;
   activeNavLocation: LatLng | null;
+  activeNavRouteDist?: number | null;
   hasDestination: boolean;
   onMapClick: (coords: LatLng) => void;
   onMapTapWithDestination?: () => void;
@@ -43,6 +48,7 @@ export const MapView: React.FC<Props> = ({
   mapStyle,
   isNavigating,
   activeNavLocation,
+  activeNavRouteDist = null,
   hasDestination,
   onMapClick,
   onMapTapWithDestination,
@@ -63,9 +69,17 @@ export const MapView: React.FC<Props> = ({
   const routeRef = useRef<RouteData | null>(route);
   routeRef.current = route;
 
+  const indexedRoute = useMemo<IndexedRoute | null>(
+    () => (route?.geometry ? buildIndexedRoute(route.geometry) : null),
+    [route]
+  );
+  const indexedRouteRef = useRef<IndexedRoute | null>(indexedRoute);
+  indexedRouteRef.current = indexedRoute;
+
   const isInitialMountRef = useRef(true);
   const lastFramedDestKeyRef = useRef<string | null>(null);
   const prevIsNavigatingRef = useRef(isNavigating);
+  const lastFollowCameraKeyRef = useRef<string | null>(null);
 
   // Apply unconstrained physical dimensions on mobile viewport
   useExactViewport(mapContainerRef, mapInstanceRef);
@@ -76,6 +90,12 @@ export const MapView: React.FC<Props> = ({
 
   const activeNavLocationRef = useRef(activeNavLocation);
   activeNavLocationRef.current = activeNavLocation;
+
+  const targetHeadingRef = useRef(targetHeading);
+  targetHeadingRef.current = targetHeading;
+
+  const userLocationRef = useRef(userLocation);
+  userLocationRef.current = userLocation;
 
   const mapStyleRef = useRef(mapStyle);
   mapStyleRef.current = mapStyle;
@@ -97,6 +117,21 @@ export const MapView: React.FC<Props> = ({
 
   const isRouteSheetCollapsedRef = useRef(isRouteSheetCollapsed);
   isRouteSheetCollapsedRef.current = isRouteSheetCollapsed;
+
+  // Frame-synced passed/remaining route updater: only triggered by actual visual marker progress
+  const handleMarkerFrame = useCallback((visualPos: LatLng, visualDistMeters: number | null) => {
+    const map = mapInstanceRef.current;
+    const curRoute = routeRef.current;
+    if (!map || !curRoute || !isNavigatingRef.current) return;
+    updateRouteLayer(
+      map,
+      curRoute,
+      true,
+      visualPos,
+      indexedRouteRef.current,
+      visualDistMeters
+    );
+  }, []);
 
   // 1. Initialize MapLibre GL Map
   useEffect(() => {
@@ -137,17 +172,37 @@ export const MapView: React.FC<Props> = ({
       setTimeout(() => map.resize(), 100);
       setTimeout(() => map.resize(), 500);
       onMapReady?.(map);
-      updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
+      const visual = getVisualMarkerState();
+      updateRouteLayer(
+        map,
+        routeRef.current,
+        isNavigatingRef.current,
+        visual.pos || activeNavLocationRef.current,
+        indexedRouteRef.current,
+        visual.routeDistMeters
+      );
       updateStreetLighting(map, routeRef.current, mapStyleRef.current);
     });
 
     map.on('style.load', () => {
-      updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
+      const visual = getVisualMarkerState();
+      updateRouteLayer(
+        map,
+        routeRef.current,
+        isNavigatingRef.current,
+        visual.pos || activeNavLocationRef.current,
+        indexedRouteRef.current,
+        visual.routeDistMeters
+      );
       updateStreetLighting(map, routeRef.current, mapStyleRef.current);
     });
 
     map.on('rotate', () => {
       onBearingChangeRef.current?.(map.getBearing());
+      const activeHeading = isNavigatingRef.current
+        ? targetHeadingRef.current
+        : userLocationRef.current?.heading;
+      syncUserMarkerHeadingRotation(map, userMarkerRef, activeHeading);
     });
 
     // Re-apply route and ambient lights after style changes
@@ -155,7 +210,15 @@ export const MapView: React.FC<Props> = ({
       if (map.isStyleLoaded() && routeRef.current) {
         const sourceId = 'active-route-source';
         if (!map.getSource(sourceId)) {
-          updateRouteLayer(map, routeRef.current, isNavigatingRef.current, activeNavLocationRef.current);
+          const visual = getVisualMarkerState();
+          updateRouteLayer(
+            map,
+            routeRef.current,
+            isNavigatingRef.current,
+            visual.pos || activeNavLocationRef.current,
+            indexedRouteRef.current,
+            visual.routeDistMeters
+          );
         }
         const lightsSourceId = 'street-lights-source';
         if (!map.getSource(lightsSourceId)) {
@@ -291,11 +354,21 @@ export const MapView: React.FC<Props> = ({
     map.setStyle(MAP_STYLES[mapStyle] as any);
   }, [mapStyle]);
 
-  // 3. Update route on map and frame bounds ONLY when a new destination is selected
+  // 3. Update route on map and frame bounds ONLY when a new destination/route/style loads.
+  // During navigation, continuous passed-route paling is driven directly by handleMarkerFrame so it never jumps ahead of the dot!
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
-    updateRouteLayer(map, route, isNavigating, activeNavLocation);
+
+    const visual = getVisualMarkerState();
+    updateRouteLayer(
+      map,
+      route,
+      isNavigating,
+      isNavigating ? visual.pos || activeNavLocationRef.current : null,
+      indexedRoute,
+      isNavigating ? (activeNavRouteDist === null ? null : visual.routeDistMeters) : null
+    );
     updateStreetLighting(map, route, mapStyle);
 
     if (route && !isNavigating) {
@@ -307,7 +380,7 @@ export const MapView: React.FC<Props> = ({
     } else if (!route) {
       lastFramedDestKeyRef.current = null;
     }
-  }, [route, isNavigating, activeNavLocation, mapStyle]);
+  }, [route, indexedRoute, isNavigating, mapStyle]);
 
   // Re-frame the route in the safe zone above the bottom sheet whenever active navigation ends
   useEffect(() => {
@@ -382,7 +455,7 @@ export const MapView: React.FC<Props> = ({
     };
   }, [isNavigating, isRouteSheetCollapsed, route]);
 
-  // 4. Render and update User Location marker with continuous 60fps constant speed interpolation
+  // 4. Render and update User Location marker with continuous 60fps Turf path interpolation
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -393,9 +466,12 @@ export const MapView: React.FC<Props> = ({
       activeNavLocation,
       isNavigating,
       targetHeading,
-      userLocation?.speed
+      userLocation?.speed,
+      indexedRoute,
+      activeNavRouteDist,
+      handleMarkerFrame
     );
-  }, [userLocation, activeNavLocation, isNavigating, targetHeading]);
+  }, [userLocation, activeNavLocation, activeNavRouteDist, indexedRoute, isNavigating, targetHeading, handleMarkerFrame]);
 
   // 5. Render and update Destination marker
   useEffect(() => {
@@ -410,17 +486,32 @@ export const MapView: React.FC<Props> = ({
     );
   }, [destination, isNavigating]);
 
-  // 6. Navigation Follow Camera Engine (Fluid 60 FPS GPU-Accelerated Perspective)
+  // 6. Navigation Follow Camera Engine (Synchronized to GPS cadence & deduplicated)
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map || !isNavigating || !isFollowingUser || isRouteOverview) return;
+    if (!map || !isNavigating || !isFollowingUser || isRouteOverview) {
+      lastFollowCameraKeyRef.current = null;
+      return;
+    }
 
     const targetCoord =
       activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
     if (!targetCoord) return;
 
-    followNavigationCamera(map, targetCoord, targetHeading, standardNavZoom);
-  }, [activeNavLocation, userLocation, isNavigating, isFollowingUser, isRouteOverview, targetHeading, standardNavZoom]);
+    const camKey = `${targetCoord[0].toFixed(6)},${targetCoord[1].toFixed(6)},${
+      typeof targetHeading === 'number' ? Math.round(targetHeading) : 'null'
+    },${standardNavZoom}`;
+    if (lastFollowCameraKeyRef.current === camKey) return;
+    lastFollowCameraKeyRef.current = camKey;
+
+    followNavigationCamera(
+      map,
+      targetCoord,
+      targetHeading,
+      standardNavZoom,
+      getMarkerGlideDuration()
+    );
+  }, [activeNavLocation, isNavigating, isFollowingUser, isRouteOverview, targetHeading, standardNavZoom]);
 
   // 7. Route Overview Zoom-Out Mode during navigation
   useEffect(() => {

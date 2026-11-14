@@ -215,3 +215,202 @@ export function splitRouteGeometry(
   }
 }
 
+/**
+ * Pre-indexed route geometry with cumulative Turf distances in meters.
+ * Enables allocation-free 60 FPS distance interpolation and deterministic
+ * passed/remaining geometry splitting synchronized to the location dot.
+ */
+export interface IndexedRoute {
+  key: string;
+  geometry: LatLng[];
+  line: ReturnType<typeof turf.lineString>;
+  cumDistMeters: number[];
+  totalMeters: number;
+}
+
+export function buildIndexedRoute(geometry: LatLng[]): IndexedRoute | null {
+  if (!geometry || geometry.length < 2) return null;
+
+  const lineCoords = geometry.map((c) => [c[1], c[0]] as [number, number]);
+  const line = turf.lineString(lineCoords);
+  const cumDistMeters: number[] = new Array(geometry.length);
+  cumDistMeters[0] = 0;
+
+  let total = 0;
+  for (let i = 1; i < geometry.length; i++) {
+    const p1 = turf.point(lineCoords[i - 1]);
+    const p2 = turf.point(lineCoords[i]);
+    const segLen = turf.distance(p1, p2, { units: 'meters' });
+    total += isFinite(segLen) ? segLen : 0;
+    cumDistMeters[i] = total;
+  }
+
+  const first = geometry[0];
+  const last = geometry[geometry.length - 1];
+  const key = `${geometry.length}:${Math.round(total)}:${first[0].toFixed(5)},${first[1].toFixed(5)}:${last[0].toFixed(5)},${last[1].toFixed(5)}`;
+
+  return {
+    key,
+    geometry,
+    line,
+    cumDistMeters,
+    totalMeters: total,
+  };
+}
+
+/**
+ * Finds the segment index containing `distMeters` via binary search.
+ */
+function findSegmentIndexForDistance(cumDistMeters: number[], distMeters: number): number {
+  let lo = 0;
+  let hi = cumDistMeters.length - 2;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (distMeters < cumDistMeters[mid]) {
+      hi = mid - 1;
+    } else if (distMeters > cumDistMeters[mid + 1]) {
+      lo = mid + 1;
+    } else {
+      return mid;
+    }
+  }
+  return Math.max(0, Math.min(cumDistMeters.length - 2, lo));
+}
+
+/**
+ * Resolves the exact LatLng at `distMeters` along an IndexedRoute (60 FPS safe).
+ */
+export function getPointAtRouteDistance(indexed: IndexedRoute, distMeters: number): LatLng {
+  const { geometry, cumDistMeters, totalMeters } = indexed;
+  if (distMeters <= 0) return geometry[0];
+  if (distMeters >= totalMeters) return geometry[geometry.length - 1];
+
+  const segIdx = findSegmentIndexForDistance(cumDistMeters, distMeters);
+  const segStartDist = cumDistMeters[segIdx];
+  const segEndDist = cumDistMeters[segIdx + 1];
+  const segLen = segEndDist - segStartDist;
+  const t = segLen > 0.0001 ? (distMeters - segStartDist) / segLen : 0;
+
+  const p1 = geometry[segIdx];
+  const p2 = geometry[segIdx + 1];
+  return [
+    p1[0] + (p2[0] - p1[0]) * t,
+    p1[1] + (p2[1] - p1[1]) * t,
+  ];
+}
+
+/**
+ * Resolves the forward road bearing at `distMeters` along an IndexedRoute.
+ */
+export function getHeadingAtRouteDistance(indexed: IndexedRoute, distMeters: number): number | null {
+  const { geometry, cumDistMeters, totalMeters } = indexed;
+  if (geometry.length < 2) return null;
+  const clamped = Math.max(0, Math.min(totalMeters, distMeters));
+  const segIdx = findSegmentIndexForDistance(cumDistMeters, clamped);
+
+  // If the current segment is extremely short (< 1.5m), look ahead slightly for stable heading
+  for (let i = segIdx; i < geometry.length - 1; i++) {
+    const segLen = cumDistMeters[i + 1] - cumDistMeters[i];
+    if (segLen >= 1.5 || i === geometry.length - 2) {
+      return calculateBearing(geometry[i], geometry[i + 1]);
+    }
+  }
+  return calculateBearing(geometry[geometry.length - 2], geometry[geometry.length - 1]);
+}
+
+/**
+ * Snaps a GPS position to an IndexedRoute in a single Turf pass, returning
+ * exact distance along the route, remaining distance, off-route distance, and tangent heading.
+ */
+export function snapPointToIndexedRoute(
+  currentPos: LatLng,
+  indexed: IndexedRoute
+): {
+  snappedPos: LatLng;
+  distAlongMeters: number;
+  remainingDistanceMeters: number;
+  offRouteDistance: number;
+  routeTangent: number | null;
+} {
+  try {
+    const pt = turf.point([currentPos[1], currentPos[0]]);
+    const nearest = turf.nearestPointOnLine(indexed.line, pt, { units: 'meters' });
+    const offRouteDistance = Math.round(nearest.properties.dist ?? 0);
+    const [snappedLng, snappedLat] = nearest.geometry.coordinates;
+    const snappedPos: LatLng = [snappedLat, snappedLng];
+
+    const segIdx = Math.max(
+      0,
+      Math.min(indexed.geometry.length - 2, nearest.properties.index ?? 0)
+    );
+    const segStartCoord = indexed.geometry[segIdx];
+    const segStartPt = turf.point([segStartCoord[1], segStartCoord[0]]);
+    const snappedPt = turf.point([snappedLng, snappedLat]);
+    const distIntoSeg = turf.distance(segStartPt, snappedPt, { units: 'meters' });
+
+    const distAlongMeters = Math.max(
+      0,
+      Math.min(
+        indexed.totalMeters,
+        indexed.cumDistMeters[segIdx] + (isFinite(distIntoSeg) ? distIntoSeg : 0)
+      )
+    );
+    const remainingDistanceMeters = Math.max(0, Math.round(indexed.totalMeters - distAlongMeters));
+    const routeTangent = getHeadingAtRouteDistance(indexed, distAlongMeters);
+
+    return {
+      snappedPos,
+      distAlongMeters,
+      remainingDistanceMeters,
+      offRouteDistance,
+      routeTangent,
+    };
+  } catch {
+    const fallbackRemaining = calculateHaversineDistance(
+      currentPos,
+      indexed.geometry[indexed.geometry.length - 1]
+    );
+    return {
+      snappedPos: currentPos,
+      distAlongMeters: 0,
+      remainingDistanceMeters: fallbackRemaining,
+      offRouteDistance: 0,
+      routeTangent: null,
+    };
+  }
+}
+
+/**
+ * Deterministically splits an IndexedRoute into `passed` and `remaining` coordinate arrays
+ * right at `distMeters`, ensuring passed geometry never extends ahead of the location dot.
+ */
+export function splitIndexedRouteAtDistance(
+  indexed: IndexedRoute,
+  distMeters: number
+): { passed: LatLng[]; remaining: LatLng[] } {
+  const { geometry, cumDistMeters, totalMeters } = indexed;
+  if (geometry.length < 2) {
+    return { passed: [], remaining: geometry };
+  }
+  if (distMeters <= 0.5) {
+    return { passed: [], remaining: geometry };
+  }
+  if (distMeters >= totalMeters - 0.5) {
+    return { passed: geometry, remaining: [] };
+  }
+
+  const segIdx = findSegmentIndexForDistance(cumDistMeters, distMeters);
+  const splitPoint = getPointAtRouteDistance(indexed, distMeters);
+
+  const passed: LatLng[] = geometry.slice(0, segIdx + 1);
+  passed.push(splitPoint);
+
+  const remaining: LatLng[] = [splitPoint];
+  for (let i = segIdx + 1; i < geometry.length; i++) {
+    remaining.push(geometry[i]);
+  }
+
+  return { passed, remaining };
+}
+
+

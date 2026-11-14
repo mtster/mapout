@@ -1,6 +1,10 @@
 import { Map as MapLibreMap, GeoJSONSource } from 'maplibre-gl';
 import { LatLng, RouteData } from '../../types';
-import { splitRouteGeometry } from '../../services/turfMathService';
+import {
+  IndexedRoute,
+  splitIndexedRouteAtDistance,
+  splitRouteGeometry,
+} from '../../services/turfMathService';
 
 export const ROUTE_SOURCE_ID = 'active-route-source';
 export const ROUTE_PASSED_CASING_LAYER_ID = 'active-route-passed-casing';
@@ -10,14 +14,16 @@ export const ROUTE_LINE_LAYER_ID = 'active-route-line';
 
 /**
  * Mounts, updates, or tears down the GeoJSON vector route layer on the map.
- * When navigating, the route already passed by the user's location is rendered
+ * When navigating, the route already passed by the visible location dot is rendered
  * muted/grayed out, while the remaining path ahead remains glowing vibrant blue.
  */
 export function updateRouteLayer(
   map: MapLibreMap,
   currentRoute: RouteData | null,
   isNavigating = false,
-  activeLocation: LatLng | null = null
+  activeLocation: LatLng | null = null,
+  indexedRoute: IndexedRoute | null = null,
+  distAlongRoute: number | null = null
 ) {
   if (!map || !map.isStyleLoaded()) return;
 
@@ -27,7 +33,11 @@ export function updateRouteLayer(
   let remainingCoords: [number, number][] = [];
 
   if (hasGeometry && currentRoute) {
-    if (isNavigating && activeLocation) {
+    if (isNavigating && indexedRoute && distAlongRoute !== null && distAlongRoute !== undefined) {
+      const { passed, remaining } = splitIndexedRouteAtDistance(indexedRoute, distAlongRoute);
+      passedCoords = passed.map((pt) => [pt[1], pt[0]]);
+      remainingCoords = remaining.map((pt) => [pt[1], pt[0]]);
+    } else if (isNavigating && activeLocation) {
       const { passed, remaining } = splitRouteGeometry(activeLocation, currentRoute.geometry);
       passedCoords = passed.map((pt) => [pt[1], pt[0]]);
       remainingCoords = remaining.map((pt) => [pt[1], pt[0]]);

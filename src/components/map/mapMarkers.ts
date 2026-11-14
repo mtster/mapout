@@ -1,40 +1,131 @@
 import React from 'react';
 import { Map as MapLibreMap, Marker } from 'maplibre-gl';
 import { LatLng, UserLocation } from '../../types';
+import {
+  IndexedRoute,
+  calculateHaversineDistance,
+  getPointAtRouteDistance,
+  getShortestAngleDiff,
+} from '../../services/turfMathService';
 
 export interface MarkerRefs {
   userMarker: Marker | null;
   destMarker: Marker | null;
 }
 
+export type MarkerFrameCallback = (pos: LatLng, routeDistMeters: number | null) => void;
+
 interface UserMarkerAnimationState {
   rafId: number | null;
+  mode: 'route' | 'coords';
+  routeKey: string | null;
+  indexedRoute: IndexedRoute | null;
+  // Route-distance interpolation state (meters)
+  startDist: number;
+  currentDist: number;
+  targetDist: number;
+  // Coordinate fallback interpolation state
   startLng: number;
   startLat: number;
+  currentLng: number;
+  currentLat: number;
   targetLng: number;
   targetLat: number;
+  // Timing & pacing
   startTime: number;
   duration: number;
+  smoothedCadenceMs: number;
   speed: number;
   lastUpdateTimestamp: number;
+  lastFrameCallbackTime: number;
+  onFrame: MarkerFrameCallback | null;
+  // Unwrapped heading angle (degrees clockwise from True North)
+  unwrappedHeading: number | null;
 }
 
 const markerAnimState: UserMarkerAnimationState = {
   rafId: null,
+  mode: 'coords',
+  routeKey: null,
+  indexedRoute: null,
+  startDist: 0,
+  currentDist: 0,
+  targetDist: 0,
   startLng: 0,
   startLat: 0,
+  currentLng: 0,
+  currentLat: 0,
   targetLng: 0,
   targetLat: 0,
   startTime: 0,
   duration: 1000,
+  smoothedCadenceMs: 950,
   speed: 0,
   lastUpdateTimestamp: 0,
+  lastFrameCallbackTime: 0,
+  onFrame: null,
+  unwrappedHeading: null,
 };
 
 /**
- * Creates or updates the User Location GPS marker with accuracy pulse & rotating heading cone.
- * In navigation mode, uses continuous 60 FPS constant-speed linear interpolation with dead-reckoning
- * forward extrapolation so the marker never teleports or lags behind during high-speed driving.
+ * Returns the current live visual coordinates and route distance of the user dot.
+ */
+export function getVisualMarkerState(): {
+  pos: LatLng | null;
+  routeDistMeters: number | null;
+} {
+  if (markerAnimState.currentLat === 0 && markerAnimState.currentLng === 0) {
+    return { pos: null, routeDistMeters: null };
+  }
+  return {
+    pos: [markerAnimState.currentLat, markerAnimState.currentLng],
+    routeDistMeters: markerAnimState.mode === 'route' ? markerAnimState.currentDist : null,
+  };
+}
+
+export function getMarkerGlideDuration(): number {
+  return Math.min(Math.max(Math.round(markerAnimState.smoothedCadenceMs * 1.04), 450), 1850);
+}
+
+/**
+ * Keeps the directional blue heading cone orbiting accurately around the center dot
+ * in true map-relative orientation (`heading - map.getBearing()`), preventing wraparound flips.
+ */
+export function syncUserMarkerHeadingRotation(
+  map: MapLibreMap,
+  userMarkerRef: React.MutableRefObject<Marker | null>,
+  targetHeading?: number | null
+) {
+  const marker = userMarkerRef.current;
+  if (!marker) return;
+
+  const el = marker.getElement();
+  const coneWrapper = el.querySelector('.heading-cone-wrapper') as HTMLElement | null;
+  if (!coneWrapper) return;
+
+  if (typeof targetHeading === 'number' && !isNaN(targetHeading)) {
+    if (markerAnimState.unwrappedHeading === null) {
+      markerAnimState.unwrappedHeading = targetHeading;
+    } else {
+      const diff = getShortestAngleDiff(
+        ((markerAnimState.unwrappedHeading % 360) + 360) % 360,
+        targetHeading
+      );
+      markerAnimState.unwrappedHeading += diff;
+    }
+
+    const screenAngle = markerAnimState.unwrappedHeading - map.getBearing();
+    coneWrapper.style.opacity = '1';
+    coneWrapper.style.transform = `rotate(${screenAngle}deg)`;
+  } else {
+    coneWrapper.style.opacity = '0';
+  }
+}
+
+/**
+ * Creates or updates the User Location GPS marker with accuracy pulse & rotating heading arrow.
+ * In navigation mode, interpolates smoothly at 60 FPS *along the Turf IndexedRoute polyline*
+ * and invokes `onFrame` on each visual step so passed-route paling never advances ahead of the dot.
  */
 export function updateUserLocationMarker(
   map: MapLibreMap,
@@ -43,7 +134,10 @@ export function updateUserLocationMarker(
   activeNavLocation: LatLng | null,
   isNavigating: boolean,
   targetHeading?: number | null,
-  speedKmh?: number
+  speedKmh?: number,
+  indexedRoute?: IndexedRoute | null,
+  targetRouteDistMeters?: number | null,
+  onFrame?: MarkerFrameCallback
 ) {
   const activeLoc: LatLng | null =
     isNavigating && activeNavLocation
@@ -57,6 +151,10 @@ export function updateUserLocationMarker(
       cancelAnimationFrame(markerAnimState.rafId);
       markerAnimState.rafId = null;
     }
+    markerAnimState.lastUpdateTimestamp = 0;
+    markerAnimState.routeKey = null;
+    markerAnimState.indexedRoute = null;
+    markerAnimState.unwrappedHeading = null;
     if (userMarkerRef.current) {
       userMarkerRef.current.remove();
       userMarkerRef.current = null;
@@ -69,7 +167,10 @@ export function updateUserLocationMarker(
       ? targetHeading
       : userLocation?.heading;
 
-  const currentSpeed = typeof speedKmh === 'number' ? speedKmh : (userLocation?.speed || 0);
+  const currentSpeed = typeof speedKmh === 'number' ? speedKmh : userLocation?.speed || 0;
+  markerAnimState.speed = currentSpeed;
+  markerAnimState.onFrame = onFrame || null;
+  markerAnimState.indexedRoute = indexedRoute || null;
 
   if (!userMarkerRef.current) {
     const el = document.createElement('div');
@@ -79,135 +180,317 @@ export function updateUserLocationMarker(
 
     el.innerHTML = `
       <div class="accuracy-pulse absolute inset-0 rounded-full bg-sky-500/25 animate-ping"></div>
-      <div class="heading-cone absolute -top-2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[10px] border-b-sky-400 opacity-0 transition-opacity"></div>
+      <div class="heading-cone-wrapper absolute inset-0 flex items-start justify-center pointer-events-none opacity-0 transition-opacity duration-200" style="transform-origin: center center;">
+        <div class="w-0 h-0 -mt-1.5 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[10px] border-b-sky-400 drop-shadow-[0_0_4px_rgba(56,189,248,0.85)]"></div>
+      </div>
       <div class="center-dot w-4 h-4 rounded-full bg-sky-400 border-2 border-white shadow-[0_0_12px_rgba(56,189,248,0.9)] relative z-10"></div>
     `;
 
+    const initPos: LatLng =
+      isNavigating && indexedRoute && targetRouteDistMeters !== null && targetRouteDistMeters !== undefined
+        ? getPointAtRouteDistance(indexedRoute, targetRouteDistMeters)
+        : activeLoc;
+
     const marker = new Marker({ element: el, anchor: 'center' })
-      .setLngLat([activeLoc[1], activeLoc[0]])
+      .setLngLat([initPos[1], initPos[0]])
       .addTo(map);
 
     userMarkerRef.current = marker;
-    markerAnimState.startLng = activeLoc[1];
-    markerAnimState.startLat = activeLoc[0];
+    markerAnimState.startLng = initPos[1];
+    markerAnimState.startLat = initPos[0];
+    markerAnimState.currentLng = initPos[1];
+    markerAnimState.currentLat = initPos[0];
+    markerAnimState.targetLng = initPos[1];
+    markerAnimState.targetLat = initPos[0];
+    markerAnimState.routeKey = indexedRoute?.key ?? null;
+
+    if (indexedRoute && targetRouteDistMeters !== null && targetRouteDistMeters !== undefined) {
+      markerAnimState.mode = 'route';
+      markerAnimState.startDist = targetRouteDistMeters;
+      markerAnimState.currentDist = targetRouteDistMeters;
+      markerAnimState.targetDist = targetRouteDistMeters;
+    } else {
+      markerAnimState.mode = 'coords';
+    }
+
+    syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
+    return;
+  }
+
+  const marker = userMarkerRef.current;
+
+  if (!isNavigating) {
+    // Idle mode: immediate update
+    if (markerAnimState.rafId) {
+      cancelAnimationFrame(markerAnimState.rafId);
+      markerAnimState.rafId = null;
+    }
+    marker.setLngLat([activeLoc[1], activeLoc[0]]);
+    markerAnimState.currentLng = activeLoc[1];
+    markerAnimState.currentLat = activeLoc[0];
     markerAnimState.targetLng = activeLoc[1];
     markerAnimState.targetLat = activeLoc[0];
+    markerAnimState.lastUpdateTimestamp = 0;
+    markerAnimState.routeKey = null;
+    markerAnimState.mode = 'coords';
+    syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
+    return;
+  }
+
+  const now = performance.now();
+  const useRouteInterpolation =
+    Boolean(indexedRoute) &&
+    targetRouteDistMeters !== null &&
+    targetRouteDistMeters !== undefined;
+
+  if (useRouteInterpolation && indexedRoute && targetRouteDistMeters !== null && targetRouteDistMeters !== undefined) {
+    const isNewRoute = markerAnimState.routeKey !== indexedRoute.key;
+    const wasCoordsMode = markerAnimState.mode !== 'route';
+
+    if (isNewRoute) {
+      // Reroute or navigation start: reset route tracking smoothly
+      if (markerAnimState.rafId) {
+        cancelAnimationFrame(markerAnimState.rafId);
+        markerAnimState.rafId = null;
+      }
+      markerAnimState.routeKey = indexedRoute.key;
+      markerAnimState.mode = 'route';
+
+      const pt = getPointAtRouteDistance(indexedRoute, targetRouteDistMeters);
+      markerAnimState.startDist = targetRouteDistMeters;
+      markerAnimState.currentDist = targetRouteDistMeters;
+      markerAnimState.targetDist = targetRouteDistMeters;
+      markerAnimState.currentLat = pt[0];
+      markerAnimState.currentLng = pt[1];
+      marker.setLngLat([pt[1], pt[0]]);
+      markerAnimState.onFrame?.(pt, targetRouteDistMeters);
+      markerAnimState.lastUpdateTimestamp = now;
+    } else {
+      markerAnimState.mode = 'route';
+      const curDist = wasCoordsMode ? targetRouteDistMeters : markerAnimState.currentDist;
+
+      // Ignore duplicate React renders with unchanged target distance
+      if (!wasCoordsMode && Math.abs(targetRouteDistMeters - markerAnimState.targetDist) < 0.05) {
+        syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
+        return;
+      }
+
+      // Suppress tiny backward GPS noise (< 12m) when stationary or creeping
+      let effectiveTargetDist = targetRouteDistMeters;
+      if (!wasCoordsMode && effectiveTargetDist < curDist && curDist - effectiveTargetDist < 12) {
+        effectiveTargetDist = curDist;
+      }
+
+      const deltaMeters = Math.abs(effectiveTargetDist - curDist);
+
+      const rawDeltaMs =
+        markerAnimState.lastUpdateTimestamp > 0 ? now - markerAnimState.lastUpdateTimestamp : 950;
+      markerAnimState.lastUpdateTimestamp = now;
+      if (rawDeltaMs >= 200 && rawDeltaMs <= 3000) {
+        const clamped = Math.min(Math.max(rawDeltaMs, 400), 1800);
+        markerAnimState.smoothedCadenceMs = 0.35 * clamped + 0.65 * markerAnimState.smoothedCadenceMs;
+      }
+
+      if (deltaMeters > 600 || wasCoordsMode) {
+        if (markerAnimState.rafId) {
+          cancelAnimationFrame(markerAnimState.rafId);
+          markerAnimState.rafId = null;
+        }
+        const pt = getPointAtRouteDistance(indexedRoute, effectiveTargetDist);
+        markerAnimState.startDist = effectiveTargetDist;
+        markerAnimState.currentDist = effectiveTargetDist;
+        markerAnimState.targetDist = effectiveTargetDist;
+        markerAnimState.currentLat = pt[0];
+        markerAnimState.currentLng = pt[1];
+        marker.setLngLat([pt[1], pt[0]]);
+        markerAnimState.onFrame?.(pt, effectiveTargetDist);
+        syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
+        return;
+      }
+
+      if (deltaMeters < 0.05) {
+        if (markerAnimState.rafId) {
+          cancelAnimationFrame(markerAnimState.rafId);
+          markerAnimState.rafId = null;
+        }
+        const pt = getPointAtRouteDistance(indexedRoute, effectiveTargetDist);
+        markerAnimState.currentDist = effectiveTargetDist;
+        markerAnimState.targetDist = effectiveTargetDist;
+        markerAnimState.currentLat = pt[0];
+        markerAnimState.currentLng = pt[1];
+        marker.setLngLat([pt[1], pt[0]]);
+        markerAnimState.onFrame?.(pt, effectiveTargetDist);
+        syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
+        return;
+      }
+
+      if (markerAnimState.rafId) {
+        cancelAnimationFrame(markerAnimState.rafId);
+      }
+
+      markerAnimState.startDist = curDist;
+      markerAnimState.targetDist = effectiveTargetDist;
+      markerAnimState.startTime = now;
+      // 4% overlap prevents micro-pauses just before the next GPS packet arrives
+      markerAnimState.duration = Math.min(Math.max(markerAnimState.smoothedCadenceMs * 1.04, 450), 1850);
+
+      const animateRouteGlide = (frameTime: number) => {
+        const activeIdxRoute = markerAnimState.indexedRoute;
+        if (!activeIdxRoute) {
+          markerAnimState.rafId = null;
+          return;
+        }
+
+        const elapsed = frameTime - markerAnimState.startTime;
+        const progress = elapsed / markerAnimState.duration;
+        const distSpan = markerAnimState.targetDist - markerAnimState.startDist;
+        let nextDist: number;
+        let shouldContinue = false;
+
+        if (progress <= 1) {
+          nextDist = markerAnimState.startDist + distSpan * progress;
+          shouldContinue = true;
+        } else if (markerAnimState.speed >= 3 && distSpan > 0) {
+          // Gentle along-route coasting capped at 0.3 (~300ms) so marker never freezes between packets
+          const extra = Math.min(progress - 1, 0.3);
+          const dampedExtra = extra * Math.exp(-extra * 4);
+          nextDist = Math.min(
+            activeIdxRoute.totalMeters,
+            markerAnimState.targetDist + distSpan * dampedExtra
+          );
+          shouldContinue = extra < 0.3 && nextDist < activeIdxRoute.totalMeters;
+        } else {
+          nextDist = markerAnimState.targetDist;
+          shouldContinue = false;
+        }
+
+        const pt = getPointAtRouteDistance(activeIdxRoute, nextDist);
+        markerAnimState.currentDist = nextDist;
+        markerAnimState.currentLat = pt[0];
+        markerAnimState.currentLng = pt[1];
+        marker.setLngLat([pt[1], pt[0]]);
+
+        // Synchronize passed-route paling directly to the dot's visual route distance (throttled ~30fps)
+        if (!shouldContinue || frameTime - markerAnimState.lastFrameCallbackTime >= 33) {
+          markerAnimState.lastFrameCallbackTime = frameTime;
+          markerAnimState.onFrame?.(pt, nextDist);
+        }
+
+        if (shouldContinue) {
+          markerAnimState.rafId = requestAnimationFrame(animateRouteGlide);
+        } else {
+          markerAnimState.rafId = null;
+        }
+      };
+
+      markerAnimState.rafId = requestAnimationFrame(animateRouteGlide);
+    }
   } else {
-    const marker = userMarkerRef.current;
+    // Off-route or unindexed coordinate fallback: 60 FPS smooth coordinate glide
+    markerAnimState.mode = 'coords';
     const targetLng = activeLoc[1];
     const targetLat = activeLoc[0];
 
-    if (!isNavigating) {
-      // Idle mode: immediate update
+    // Ignore duplicate target calls
+    const targetShiftMeters = calculateHaversineDistance(
+      [markerAnimState.targetLat, markerAnimState.targetLng],
+      activeLoc
+    );
+    if (markerAnimState.rafId && targetShiftMeters < 0.1) {
+      syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
+      return;
+    }
+
+    const curLngLat = marker.getLngLat();
+    const currentLng = curLngLat.lng;
+    const currentLat = curLngLat.lat;
+    const moveMeters = calculateHaversineDistance([currentLat, currentLng], activeLoc);
+
+    const rawDeltaMs =
+      markerAnimState.lastUpdateTimestamp > 0 ? now - markerAnimState.lastUpdateTimestamp : 950;
+    markerAnimState.lastUpdateTimestamp = now;
+    if (rawDeltaMs >= 200 && rawDeltaMs <= 3000) {
+      const clamped = Math.min(Math.max(rawDeltaMs, 400), 1800);
+      markerAnimState.smoothedCadenceMs = 0.35 * clamped + 0.65 * markerAnimState.smoothedCadenceMs;
+    }
+
+    if (moveMeters > 600) {
       if (markerAnimState.rafId) {
         cancelAnimationFrame(markerAnimState.rafId);
         markerAnimState.rafId = null;
       }
       marker.setLngLat([targetLng, targetLat]);
-      markerAnimState.lastUpdateTimestamp = 0;
-    } else {
-      // Navigation mode: 60 FPS continuous glide with constant speed
-      const now = performance.now();
-      const timeDelta =
-        markerAnimState.lastUpdateTimestamp > 0
-          ? now - markerAnimState.lastUpdateTimestamp
-          : 1000;
-      markerAnimState.lastUpdateTimestamp = now;
-
-      // Pacing duration adapts dynamically to device GPS interval (bounded between 500ms and 1800ms)
-      const dynamicDuration = Math.min(Math.max(timeDelta, 500), 1800);
-
-      const curLngLat = marker.getLngLat();
-      const currentLng = curLngLat.lng;
-      const currentLat = curLngLat.lat;
-
-      const dLng = targetLng - currentLng;
-      const dLat = targetLat - currentLat;
-      const distSq = dLng * dLng + dLat * dLat;
-
-      // If position jumped dramatically (e.g. initial start, > 500m), snap directly
-      if (distSq > 0.0005) {
-        if (markerAnimState.rafId) {
-          cancelAnimationFrame(markerAnimState.rafId);
-          markerAnimState.rafId = null;
-        }
-        marker.setLngLat([targetLng, targetLat]);
-        markerAnimState.startLng = targetLng;
-        markerAnimState.startLat = targetLat;
-        markerAnimState.targetLng = targetLng;
-        markerAnimState.targetLat = targetLat;
-      } else if (distSq < 0.000000005) {
-        // Less than ~0.2m movement: lock without continuous animation loop
-        if (markerAnimState.rafId) {
-          cancelAnimationFrame(markerAnimState.rafId);
-          markerAnimState.rafId = null;
-        }
-        marker.setLngLat([targetLng, targetLat]);
-      } else {
-        // Start smooth constant-speed interpolation towards target
-        if (markerAnimState.rafId) {
-          cancelAnimationFrame(markerAnimState.rafId);
-        }
-
-        markerAnimState.startLng = currentLng;
-        markerAnimState.startLat = currentLat;
-        markerAnimState.targetLng = targetLng;
-        markerAnimState.targetLat = targetLat;
-        markerAnimState.startTime = now;
-        markerAnimState.duration = dynamicDuration;
-        markerAnimState.speed = currentSpeed;
-
-        const animateGlide = (frameTime: number) => {
-          const elapsed = frameTime - markerAnimState.startTime;
-          const progress = elapsed / markerAnimState.duration;
-
-          if (progress <= 1) {
-            const interpolatedLng =
-              markerAnimState.startLng + (markerAnimState.targetLng - markerAnimState.startLng) * progress;
-            const interpolatedLat =
-              markerAnimState.startLat + (markerAnimState.targetLat - markerAnimState.startLat) * progress;
-            marker.setLngLat([interpolatedLng, interpolatedLat]);
-            markerAnimState.rafId = requestAnimationFrame(animateGlide);
-          } else if (markerAnimState.speed >= 5) {
-            // Forward dead-reckoning extrapolation only when actively moving (>= 5 km/h)
-            // Capped at 0.3 (300ms) with exponential velocity decay to prevent wandering off road
-            const extra = Math.min(progress - 1, 0.3);
-            const dampedExtra = extra * Math.exp(-extra * 4);
-            const deltaLng = markerAnimState.targetLng - markerAnimState.startLng;
-            const deltaLat = markerAnimState.targetLat - markerAnimState.startLat;
-            const extrapolatedLng = markerAnimState.targetLng + deltaLng * dampedExtra;
-            const extrapolatedLat = markerAnimState.targetLat + deltaLat * dampedExtra;
-            marker.setLngLat([extrapolatedLng, extrapolatedLat]);
-
-            if (extra < 0.3) {
-              markerAnimState.rafId = requestAnimationFrame(animateGlide);
-            } else {
-              markerAnimState.rafId = null;
-            }
-          } else {
-            // When stopped or slow (speed < 5 km/h), lock firmly at target without drifting
-            marker.setLngLat([markerAnimState.targetLng, markerAnimState.targetLat]);
-            markerAnimState.rafId = null;
-          }
-        };
-
-        markerAnimState.rafId = requestAnimationFrame(animateGlide);
+      markerAnimState.startLng = targetLng;
+      markerAnimState.startLat = targetLat;
+      markerAnimState.currentLng = targetLng;
+      markerAnimState.currentLat = targetLat;
+      markerAnimState.targetLng = targetLng;
+      markerAnimState.targetLat = targetLat;
+    } else if (moveMeters < 0.1) {
+      if (markerAnimState.rafId) {
+        cancelAnimationFrame(markerAnimState.rafId);
+        markerAnimState.rafId = null;
       }
+      marker.setLngLat([targetLng, targetLat]);
+      markerAnimState.currentLng = targetLng;
+      markerAnimState.currentLat = targetLat;
+      markerAnimState.targetLng = targetLng;
+      markerAnimState.targetLat = targetLat;
+    } else {
+      if (markerAnimState.rafId) {
+        cancelAnimationFrame(markerAnimState.rafId);
+      }
+
+      markerAnimState.startLng = currentLng;
+      markerAnimState.startLat = currentLat;
+      markerAnimState.targetLng = targetLng;
+      markerAnimState.targetLat = targetLat;
+      markerAnimState.startTime = now;
+      markerAnimState.duration = Math.min(Math.max(markerAnimState.smoothedCadenceMs * 1.04, 450), 1850);
+
+      const animateCoordGlide = (frameTime: number) => {
+        const elapsed = frameTime - markerAnimState.startTime;
+        const progress = elapsed / markerAnimState.duration;
+        let nextLng: number;
+        let nextLat: number;
+        let shouldContinue = false;
+
+        if (progress <= 1) {
+          nextLng =
+            markerAnimState.startLng + (markerAnimState.targetLng - markerAnimState.startLng) * progress;
+          nextLat =
+            markerAnimState.startLat + (markerAnimState.targetLat - markerAnimState.startLat) * progress;
+          shouldContinue = true;
+        } else if (markerAnimState.speed >= 4) {
+          const extra = Math.min(progress - 1, 0.25);
+          const dampedExtra = extra * Math.exp(-extra * 4);
+          nextLng =
+            markerAnimState.targetLng + (markerAnimState.targetLng - markerAnimState.startLng) * dampedExtra;
+          nextLat =
+            markerAnimState.targetLat + (markerAnimState.targetLat - markerAnimState.startLat) * dampedExtra;
+          shouldContinue = extra < 0.25;
+        } else {
+          nextLng = markerAnimState.targetLng;
+          nextLat = markerAnimState.targetLat;
+          shouldContinue = false;
+        }
+
+        markerAnimState.currentLng = nextLng;
+        markerAnimState.currentLat = nextLat;
+        marker.setLngLat([nextLng, nextLat]);
+
+        if (shouldContinue) {
+          markerAnimState.rafId = requestAnimationFrame(animateCoordGlide);
+        } else {
+          markerAnimState.rafId = null;
+        }
+      };
+
+      markerAnimState.rafId = requestAnimationFrame(animateCoordGlide);
     }
   }
 
-  // Update heading rotation cone if available
-  const el = userMarkerRef.current.getElement();
-  const cone = el.querySelector('.heading-cone') as HTMLElement | null;
-  if (cone) {
-    if (typeof heading === 'number' && !isNaN(heading)) {
-      cone.style.transition = 'transform 0.8s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease';
-      cone.style.opacity = '1';
-      cone.style.transform = `rotate(${heading}deg) translateY(-8px)`;
-    } else {
-      cone.style.opacity = '0';
-    }
-  }
+  syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
 }
 
 /**

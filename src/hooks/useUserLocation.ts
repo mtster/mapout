@@ -9,6 +9,11 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
   const [isCenteredOnUser, setIsCenteredOnUser] = useState(true);
 
   const hasCenteredOnUserRef = useRef(false);
+  const isNavigationActiveRef = useRef(false);
+
+  const setIsNavigationActive = useCallback((active: boolean) => {
+    isNavigationActiveRef.current = active;
+  }, []);
 
   // Initial Location detection and continuous GPS watching
   const requestLocation = useCallback(
@@ -21,6 +26,10 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
       setIsLocating(true);
       navigator.geolocation.getCurrentPosition(
         (pos) => {
+          if (isNavigationActiveRef.current && !forceCenter) {
+            setIsLocating(false);
+            return;
+          }
           const coords: UserLocation = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
@@ -70,7 +79,9 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
           speed: pos.coords.speed ? pos.coords.speed * 3.6 : 0,
           accuracy: pos.coords.accuracy,
         };
-        setUserLocation(coords);
+        if (!isNavigationActiveRef.current) {
+          setUserLocation(coords);
+        }
         setIsLocating(false);
         setLocationErrorMsg(null);
 
@@ -98,12 +109,15 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
     requestLocation(false);
   }, [requestLocation]);
 
-  // Continuously update user location in background
+  // Continuously update user location in background when not actively navigating
   useEffect(() => {
     if (!navigator.geolocation) return;
 
     const globalWatchId = navigator.geolocation.watchPosition(
       (pos) => {
+        // Yield to active navigation engine so dual watchPosition callbacks never fight
+        if (isNavigationActiveRef.current) return;
+
         const coords: UserLocation = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
@@ -144,5 +158,6 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
     setIsCenteredOnUser,
     handleLocateClick,
     requestLocation,
+    setIsNavigationActive,
   };
 }
