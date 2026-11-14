@@ -205,27 +205,33 @@ export const MapView: React.FC<Props> = ({
       syncUserMarkerHeadingRotation(map, userMarkerRef, activeHeading);
     });
 
-    // Re-apply route and ambient lights after style changes
-    map.on('styledata', () => {
-      if (map.isStyleLoaded() && routeRef.current) {
-        const sourceId = 'active-route-source';
-        if (!map.getSource(sourceId)) {
-          const visual = getVisualMarkerState();
-          updateRouteLayer(
-            map,
-            routeRef.current,
-            isNavigatingRef.current,
-            visual.pos || activeNavLocationRef.current,
-            indexedRouteRef.current,
-            visual.routeDistMeters
-          );
-        }
-        const lightsSourceId = 'street-lights-source';
-        if (!map.getSource(lightsSourceId)) {
-          updateStreetLighting(map, routeRef.current, mapStyleRef.current);
-        }
+    // Re-apply route and ambient lights after style changes or tile loading completion
+    const ensureRouteAndLightsMounted = () => {
+      const style = (map as any)?.style;
+      if (!style || !style._loaded || !routeRef.current) return;
+
+      const sourceId = 'active-route-source';
+      if (!map.getSource(sourceId)) {
+        const visual = getVisualMarkerState();
+        updateRouteLayer(
+          map,
+          routeRef.current,
+          isNavigatingRef.current,
+          visual.pos || activeNavLocationRef.current,
+          indexedRouteRef.current,
+          visual.routeDistMeters
+        );
       }
-    });
+
+      const isDark = mapStyleRef.current === 'dark' || mapStyleRef.current === 'midnight';
+      const lightsSourceId = 'street-lights-source';
+      if (isDark && !map.getSource(lightsSourceId)) {
+        updateStreetLighting(map, routeRef.current, mapStyleRef.current);
+      }
+    };
+
+    map.on('styledata', ensureRouteAndLightsMounted);
+    map.on('idle', ensureRouteAndLightsMounted);
 
     let lastDblClickTime = 0;
     let lastGestureEndTime = 0;

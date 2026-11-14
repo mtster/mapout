@@ -25,7 +25,8 @@ export function updateRouteLayer(
   indexedRoute: IndexedRoute | null = null,
   distAlongRoute: number | null = null
 ) {
-  if (!map || !map.isStyleLoaded()) return;
+  const style = (map as any)?.style;
+  if (!map || !style || !style._loaded) return;
 
   const hasGeometry = currentRoute?.geometry && currentRoute.geometry.length > 0;
 

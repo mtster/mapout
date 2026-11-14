@@ -1,6 +1,12 @@
 import { Map as MapLibreMap, GeoJSONSource } from 'maplibre-gl';
 import * as turf from '@turf/turf';
 import { LatLng, MapStyle, RouteData } from '../../types';
+import {
+  buildIndexedRoute,
+  getHeadingAtRouteDistance,
+  getPointAtRouteDistance,
+} from '../../services/turfMathService';
+import { ROUTE_PASSED_CASING_LAYER_ID } from './routeLayer';
 
 export const STREET_LIGHTS_SOURCE_ID = 'street-lights-source';
 export const STREET_LIGHTS_GLOW_LAYER_ID = 'street-lights-glow';
@@ -22,42 +28,56 @@ const WARM_GLOW_COLORS = [
   '#eab308', // pure golden glow
 ];
 
+let cachedRouteKey: string | null = null;
+let cachedFeatures: GeoJSON.Feature<GeoJSON.Point>[] = [];
+
+/**
+ * Checks whether MapLibre's internal Style JSON has finished parsing so sources/layers can be added.
+ * Unlike `map.isStyleLoaded()` (which returns `false` whenever any network vector tile is loading
+ * during active navigation panning/zooming), checking `style._loaded` allows immediate layer mounting.
+ */
+function isMapStyleReady(map: MapLibreMap): boolean {
+  if (!map) return false;
+  const style = (map as any).style;
+  return Boolean(style && style._loaded);
+}
+
 /**
  * Procedurally generates authentic street lighting lamp fixtures along the route corridor:
- * Spaced organically every ~32 to 38 meters, placed on the sidewalks/curbs on alternating sides
- * (13m - 19m lateral offset from centerline so they are never obscured by the route line),
+ * Spaced organically every ~32 meters, placed on the sidewalks/curbs on alternating sides
+ * (13.5m - 18.5m lateral offset from centerline so they are never obscured by the route line),
  * with subtle variations in warm color temperature and luminous halo intensity.
  */
 function generateRouteStreetLights(geometry: LatLng[]): GeoJSON.Feature<GeoJSON.Point>[] {
   if (!geometry || geometry.length < 2) return [];
 
   try {
-    const coords = geometry.map((c) => [c[1], c[0]]);
-    const line = turf.lineString(coords);
-    const totalMeters = turf.length(line, { units: 'meters' });
-    if (totalMeters < 20) return [];
+    const indexed = buildIndexedRoute(geometry);
+    if (!indexed || indexed.totalMeters < 20) return [];
 
-    // Spacing between lamp posts (~34 meters on standard urban & suburban roads)
-    const spacing = 34;
-    // Cap at 300 lights for peak 60 FPS mobile WebGL performance
-    const count = Math.min(Math.floor(totalMeters / spacing), 300);
+    if (cachedRouteKey === indexed.key && cachedFeatures.length > 0) {
+      return cachedFeatures;
+    }
+
+    const spacing = 32;
+    const count = Math.min(Math.floor(indexed.totalMeters / spacing), 1200);
     if (count <= 1) return [];
 
-    const stepMeters = totalMeters / count;
+    const stepMeters = indexed.totalMeters / count;
     const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
 
     for (let i = 1; i < count; i++) {
       // Natural organic spacing jitter (+- 3.0m)
       const jitter = ((i * 11) % 5 - 2) * 1.5;
-      const d = Math.max(6, Math.min(totalMeters - 6, i * stepMeters + jitter));
+      const d = Math.max(6, Math.min(indexed.totalMeters - 6, i * stepMeters + jitter));
 
-      const pt = turf.along(line, d, { units: 'meters' });
-      const nextPt = turf.along(line, Math.min(d + 4, totalMeters), { units: 'meters' });
-      const bearing = turf.bearing(pt, nextPt);
+      const pos = getPointAtRouteDistance(indexed, d);
+      const bearing = getHeadingAtRouteDistance(indexed, d) ?? 0;
+      const pt = turf.point([pos[1], pos[0]]);
 
-      // Alternate left and right curbs with 13m - 19m lateral offset to place lamps on sidewalks
-      const side = (i % 2 === 0) ? 1 : -1;
-      const offsetKm = 0.0135 + (((i * 7) % 4) * 0.0016); // 13.5m to 18.3m lateral offset
+      // Alternate left and right curbs with 13.5m - 18.3m lateral offset to place lamps on sidewalks
+      const side = i % 2 === 0 ? 1 : -1;
+      const offsetKm = 0.0135 + ((i * 7) % 4) * 0.0016;
       const offsetBearing = (bearing + side * 90 + 360) % 360;
       const lightPos = turf.destination(pt, offsetKm, offsetBearing, { units: 'kilometers' });
 
@@ -93,6 +113,8 @@ function generateRouteStreetLights(geometry: LatLng[]): GeoJSON.Feature<GeoJSON.
       }
     }
 
+    cachedRouteKey = indexed.key;
+    cachedFeatures = features;
     return features;
   } catch (err) {
     console.warn('Error generating street lights:', err);
@@ -109,86 +131,107 @@ export function updateStreetLighting(
   currentRoute: RouteData | null,
   mapStyle: MapStyle
 ) {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!isMapStyleReady(map)) return;
 
-  // Active in Darkness ('dark') and Night Life ('midnight') themes
-  const isDarkTheme = mapStyle === 'dark' || mapStyle === 'midnight';
-  const hasRoute = currentRoute?.geometry && currentRoute.geometry.length > 1;
+  try {
+    // Active in Darkness ('dark') and Night Life ('midnight') themes
+    const isDarkTheme = mapStyle === 'dark' || mapStyle === 'midnight';
+    const hasRoute = Boolean(currentRoute?.geometry && currentRoute.geometry.length > 1);
 
-  const features = isDarkTheme && hasRoute ? generateRouteStreetLights(currentRoute.geometry) : [];
+    const features =
+      isDarkTheme && hasRoute && currentRoute
+        ? generateRouteStreetLights(currentRoute.geometry)
+        : [];
 
-  const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
-    type: 'FeatureCollection',
-    features,
-  };
+    const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+      type: 'FeatureCollection',
+      features,
+    };
 
-  const existingSource = map.getSource(STREET_LIGHTS_SOURCE_ID) as GeoJSONSource | undefined;
+    const existingSource = map.getSource(STREET_LIGHTS_SOURCE_ID) as GeoJSONSource | undefined;
 
-  if (features.length > 0) {
-    if (existingSource) {
-      existingSource.setData(geojson);
-    } else {
-      map.addSource(STREET_LIGHTS_SOURCE_ID, {
-        type: 'geojson',
-        data: geojson,
-      });
+    if (features.length > 0) {
+      if (existingSource) {
+        existingSource.setData(geojson);
+      } else {
+        map.addSource(STREET_LIGHTS_SOURCE_ID, {
+          type: 'geojson',
+          data: geojson,
+        });
+      }
+
+      // Place lights cleanly underneath the route line if mounted, otherwise on top of basemap
+      const beforeLayerId = map.getLayer(ROUTE_PASSED_CASING_LAYER_ID)
+        ? ROUTE_PASSED_CASING_LAYER_ID
+        : undefined;
 
       // 1. Broad outer diffuse warm amber ambient puddle / halo
       if (!map.getLayer(STREET_LIGHTS_GLOW_LAYER_ID)) {
-        map.addLayer({
-          id: STREET_LIGHTS_GLOW_LAYER_ID,
-          type: 'circle',
-          source: STREET_LIGHTS_SOURCE_ID,
-          paint: {
-            'circle-color': ['get', 'glowColor'],
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 14, 10, 16, 18, 18, 28],
-            'circle-blur': 0.65,
-            'circle-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.15, 14, 0.45, 16, 0.70, 18, 0.85],
+        map.addLayer(
+          {
+            id: STREET_LIGHTS_GLOW_LAYER_ID,
+            type: 'circle',
+            source: STREET_LIGHTS_SOURCE_ID,
+            paint: {
+              'circle-color': ['get', 'glowColor'],
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 14, 11, 16, 20, 18, 30],
+              'circle-blur': 0.72,
+              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.15, 14, 0.4, 16, 0.62, 18, 0.78],
+            },
           },
-        });
+          beforeLayerId
+        );
       }
 
       // 2. Mid golden lamp corona
       if (!map.getLayer(STREET_LIGHTS_MID_LAYER_ID)) {
-        map.addLayer({
-          id: STREET_LIGHTS_MID_LAYER_ID,
-          type: 'circle',
-          source: STREET_LIGHTS_SOURCE_ID,
-          paint: {
-            'circle-color': ['get', 'coreColor'],
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2, 14, 5, 16, 9, 18, 14],
-            'circle-blur': 0.40,
-            'circle-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.25, 14, 0.65, 16, 0.85, 18, 0.95],
+        map.addLayer(
+          {
+            id: STREET_LIGHTS_MID_LAYER_ID,
+            type: 'circle',
+            source: STREET_LIGHTS_SOURCE_ID,
+            paint: {
+              'circle-color': ['get', 'coreColor'],
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2, 14, 5, 16, 9, 18, 14],
+              'circle-blur': 0.45,
+              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.25, 14, 0.6, 16, 0.8, 18, 0.92],
+            },
           },
-        });
+          beforeLayerId
+        );
       }
 
       // 3. Crisp, intensely warm incandescent lamp fixture bulb
       if (!map.getLayer(STREET_LIGHTS_CORE_LAYER_ID)) {
-        map.addLayer({
-          id: STREET_LIGHTS_CORE_LAYER_ID,
-          type: 'circle',
-          source: STREET_LIGHTS_SOURCE_ID,
-          paint: {
-            'circle-color': '#fffdf0',
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 14, 2.5, 16, 4.2, 18, 6.0],
-            'circle-blur': 0.10,
-            'circle-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.4, 14, 0.85, 16, 0.95, 18, 1.0],
+        map.addLayer(
+          {
+            id: STREET_LIGHTS_CORE_LAYER_ID,
+            type: 'circle',
+            source: STREET_LIGHTS_SOURCE_ID,
+            paint: {
+              'circle-color': '#fffdf0',
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 14, 2.2, 16, 3.5, 18, 5.0],
+              'circle-blur': 0.15,
+              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.35, 14, 0.75, 16, 0.92, 18, 1.0],
+            },
           },
+          beforeLayerId
+        );
+      }
+    } else {
+      // Light features empty or not dark mode -> clear cleanly
+      if (existingSource) {
+        existingSource.setData({
+          type: 'FeatureCollection',
+          features: [],
         });
       }
+      if (map.getLayer(STREET_LIGHTS_CORE_LAYER_ID)) map.removeLayer(STREET_LIGHTS_CORE_LAYER_ID);
+      if (map.getLayer(STREET_LIGHTS_MID_LAYER_ID)) map.removeLayer(STREET_LIGHTS_MID_LAYER_ID);
+      if (map.getLayer(STREET_LIGHTS_GLOW_LAYER_ID)) map.removeLayer(STREET_LIGHTS_GLOW_LAYER_ID);
+      if (map.getSource(STREET_LIGHTS_SOURCE_ID)) map.removeSource(STREET_LIGHTS_SOURCE_ID);
     }
-  } else {
-    // Light features empty or not dark mode -> set empty or tear down cleanly
-    if (existingSource) {
-      existingSource.setData({
-        type: 'FeatureCollection',
-        features: [],
-      });
-    }
-    if (map.getLayer(STREET_LIGHTS_CORE_LAYER_ID)) map.removeLayer(STREET_LIGHTS_CORE_LAYER_ID);
-    if (map.getLayer(STREET_LIGHTS_MID_LAYER_ID)) map.removeLayer(STREET_LIGHTS_MID_LAYER_ID);
-    if (map.getLayer(STREET_LIGHTS_GLOW_LAYER_ID)) map.removeLayer(STREET_LIGHTS_GLOW_LAYER_ID);
-    if (map.getSource(STREET_LIGHTS_SOURCE_ID)) map.removeSource(STREET_LIGHTS_SOURCE_ID);
+  } catch (err) {
+    console.warn('Could not update street lighting layer:', err);
   }
 }
