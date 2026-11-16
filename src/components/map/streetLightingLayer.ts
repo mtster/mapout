@@ -18,11 +18,12 @@ const BEFORE_LAYER_CANDIDATES = [
   ROUTE_PASSED_CASING_LAYER_ID,
 ];
 
-const MAX_ACTIVE_LIGHTS = 75;
-const MAX_STORED_CELLS = 180;
-const REFRESH_THROTTLE_MS = 280;
-const FADE_IN_MS = 450;
-const FADE_OUT_MS = 380;
+// Single permanent geographic grid (~100m blocks) so lights stay bolted to fixed real-world spots across all zooms
+const CELL_DEG = 0.00105;
+const MAX_ACTIVE_LIGHTS = 120;
+const MAX_STORED_CELLS = 260;
+const MOVE_SCAN_THROTTLE_MS = 450;
+const FADE_IN_MS = 260;
 
 // Warm, restrained sodium/incandescent light tints (RGB 0..1)
 const LIGHT_PALETTE: [number, number, number][] = [
@@ -39,10 +40,9 @@ interface LightEntry {
   baseRadiusMeters: number;
   color: [number, number, number];
   boost: number;
-  priority: number; // Higher for major roads & proximity to viewport center
+  minZoom: number;
+  staticPriority: number; // Strictly deterministic (never depends on camera position)
   createdAt: number;
-  lastSeenAt: number;
-  exitingAt: number | null;
 }
 
 function hashGrid(gx: number, gy: number): number {
@@ -106,16 +106,14 @@ const FRAGMENT_SHADER_SRC = `
 
     if (u_pass < 0.5) {
       // Pass 1 (Multiplicative albedo illumination via gl.blendFunc(GL_DST_COLOR, GL_ONE)):
-      // Output color is multiplied against underlying road/building pixels: Out = Dst * (1 + Src)
+      // Brightens underlying dark grey roads & casings inside the circle: Out = Dst * (1 + Src)
       vec3 boost = v_color_alpha.rgb * pool * alpha * 1.55;
       gl_FragColor = vec4(boost, 0.0);
     } else {
       // Pass 2 (Additive soft ground scatter + restrained small bulb filament):
-      // Subtle atmospheric ground wash ensures even pure-black roadways catch light,
-      // while a small crisp filament anchors the pool without forming giant glowing blobs.
       vec3 groundWash = v_color_alpha.rgb * pool * 0.055;
-      float filament = exp(-r * r * 920.0) * 0.52;
-      float innerGlow = exp(-r * r * 140.0) * 0.14;
+      float filament = exp(-r * r * 920.0) * 0.50;
+      float innerGlow = exp(-r * r * 140.0) * 0.13;
       vec3 bulb = vec3(1.0, 0.94, 0.80) * (filament + innerGlow);
       gl_FragColor = vec4((groundWash + bulb) * alpha, 0.0);
     }
@@ -137,15 +135,15 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
   private uPassLoc: WebGLUniformLocation | null = null;
 
   private lights = new Map<string, LightEntry>();
-  private lastRefreshMs = 0;
+  private lastScanMs = 0;
   private vertexData = new Float32Array(MAX_ACTIVE_LIGHTS * 6 * 8); // 6 verts/quad * 8 floats/vert
   private isDestroyed = false;
 
-  private boundScheduleRefresh = () => this.scheduleRefresh(false);
-  private boundImmediateRefresh = () => this.scheduleRefresh(true);
-  private boundSourceDataRefresh = (e: { sourceId?: string; isSourceLoaded?: boolean }) => {
+  private boundThrottledScan = () => this.scanViewportRoads(false);
+  private boundImmediateScan = () => this.scanViewportRoads(true);
+  private boundSourceDataScan = (e: { sourceId?: string; isSourceLoaded?: boolean }) => {
     if (e.sourceId === 'openmaptiles' && e.isSourceLoaded) {
-      this.scheduleRefresh(false);
+      this.scanViewportRoads(false);
     }
   };
 
@@ -181,23 +179,20 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
 
     this.vertexBuffer = gl.createBuffer();
 
-    map.on('move', this.boundScheduleRefresh);
-    map.on('moveend', this.boundImmediateRefresh);
-    map.on('zoomend', this.boundImmediateRefresh);
-    map.on('sourcedata', this.boundSourceDataRefresh);
-    map.on('idle', this.boundScheduleRefresh);
+    map.on('move', this.boundThrottledScan);
+    map.on('moveend', this.boundImmediateScan);
+    map.on('zoomend', this.boundImmediateScan);
+    map.on('sourcedata', this.boundSourceDataScan);
 
-    // Initial scan once current viewport tiles settle
-    this.scheduleRefresh(true);
+    this.scanViewportRoads(true);
   }
 
   onRemove(map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
     this.isDestroyed = true;
-    map.off('move', this.boundScheduleRefresh);
-    map.off('moveend', this.boundImmediateRefresh);
-    map.off('zoomend', this.boundImmediateRefresh);
-    map.off('sourcedata', this.boundSourceDataRefresh);
-    map.off('idle', this.boundScheduleRefresh);
+    map.off('move', this.boundThrottledScan);
+    map.off('moveend', this.boundImmediateScan);
+    map.off('zoomend', this.boundImmediateScan);
+    map.off('sourcedata', this.boundSourceDataScan);
 
     if (this.vertexBuffer) {
       gl.deleteBuffer(this.vertexBuffer);
@@ -211,45 +206,40 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
     this.map = null;
   }
 
-  private scheduleRefresh(force: boolean) {
+  private scanViewportRoads(force: boolean) {
     if (this.isDestroyed || !this.map) return;
     const now = performance.now();
-    if (!force && now - this.lastRefreshMs < REFRESH_THROTTLE_MS) {
+    if (!force && now - this.lastScanMs < MOVE_SCAN_THROTTLE_MS) {
       return;
     }
-    this.lastRefreshMs = now;
-    this.refreshViewportLights(now);
+    this.lastScanMs = now;
+    this.populateFixedViewportLights(now);
   }
 
-  private refreshViewportLights(now: number) {
+  private populateFixedViewportLights(now: number) {
     const map = this.map;
     if (!map || !isMapStyleReady(map)) return;
 
-    const zoom = map.getZoom();
-    let didChange = false;
+    const bounds = map.getBounds();
+    const padLng = Math.max(0.003, (bounds.getEast() - bounds.getWest()) * 0.45);
+    const padLat = Math.max(0.003, (bounds.getNorth() - bounds.getSouth()) * 0.45);
+    const minLng = bounds.getWest() - padLng;
+    const maxLng = bounds.getEast() + padLng;
+    const minLat = bounds.getSouth() - padLat;
+    const maxLat = bounds.getNorth() + padLat;
 
-    if (zoom < 11.2) {
-      // Fade out existing lights cleanly on macro zooms
-      for (const entry of this.lights.values()) {
-        if (entry.exitingAt === null) {
-          entry.exitingAt = now;
-          didChange = true;
-        }
+    // Evict ONLY lights that have scrolled completely outside the padded viewport
+    for (const [key, entry] of this.lights.entries()) {
+      if (entry.lng < minLng || entry.lng > maxLng || entry.lat < minLat || entry.lat > maxLat) {
+        this.lights.delete(key);
       }
-      if (didChange) map.triggerRepaint();
-      return;
     }
+
+    const zoom = map.getZoom();
+    if (zoom < 11.2) return;
 
     const activeRoadLayers = ROAD_LAYER_IDS.filter((id) => Boolean(map.getLayer(id)));
     if (activeRoadLayers.length === 0) return;
-
-    const bounds = map.getBounds();
-    const center = map.getCenter();
-    const cosLat = Math.max(0.25, Math.cos((center.lat * Math.PI) / 180));
-
-    // Adaptive spatial grid cell size so light density remains crisp across urban zooms
-    const cellDeg = zoom >= 16 ? 0.0009 : zoom >= 14 ? 0.0018 : 0.004;
-    const cellTier = zoom >= 16 ? 'hi' : zoom >= 14 ? 'md' : 'lo';
 
     let features: GeoJSON.Feature[] = [];
     try {
@@ -260,7 +250,9 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
       return;
     }
 
-    const seenInPass = new Set<string>();
+    const center = map.getCenter();
+    const cosLat = Math.max(0.25, Math.cos((center.lat * Math.PI) / 180));
+    let didAdd = false;
 
     for (let fIdx = 0; fIdx < features.length; fIdx++) {
       const feat = features[fIdx];
@@ -286,33 +278,21 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
           const p0 = coords[i];
           const p1 = coords[i + 1];
 
-          // Evaluate midpoint of each visible road segment
           const midLng = (p0[0] + p1[0]) * 0.5;
           const midLat = (p0[1] + p1[1]) * 0.5;
 
-          const gx = Math.floor(midLng / cellDeg);
-          const gy = Math.floor(midLat / cellDeg);
-          const key = `${cellTier}:${gx}:${gy}`;
+          const gx = Math.floor(midLng / CELL_DEG);
+          const gy = Math.floor(midLat / CELL_DEG);
+          const key = `${gx}:${gy}`;
 
-          if (seenInPass.has(key)) continue;
+          // Once a cell is populated, it stays permanently fixed in place while in padded bounds
+          if (this.lights.has(key)) continue;
 
           const h0 = hashGrid(gx, gy);
-          // Organic density: ~58% of road cells get a light, leaving natural darker blocks between pockets
+          // Organic density: ~58% of road cells host a street light
           if (h0 < 0.42) continue;
 
-          seenInPass.add(key);
-
-          const existing = this.lights.get(key);
-          if (existing) {
-            existing.lastSeenAt = now;
-            if (existing.exitingAt !== null) {
-              existing.exitingAt = null;
-              didChange = true;
-            }
-            continue;
-          }
-
-          // Compute subtle curb/roadside perpendicular offset (5.5m - 10.5m from road centerline)
+          // Subtle roadside/curb perpendicular offset (5.5m - 10.5m from centerline)
           const dx = (p1[0] - p0[0]) * cosLat;
           const dy = p1[1] - p0[1];
           const segLen = Math.hypot(dx, dy);
@@ -335,11 +315,12 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
           const hBoost = hashGrid(gx + 7, gy - 67);
 
           const color = LIGHT_PALETTE[Math.floor(hColor * LIGHT_PALETTE.length) % LIGHT_PALETTE.length];
-          const baseRadiusMeters = 44 + hRadius * 24; // 44m - 68m illumination pool radius
+          const baseRadiusMeters = 44 + hRadius * 24;
           const boost = 0.85 + hBoost * 0.35;
 
-          const distFromCenter = Math.hypot((lightLng - center.lng) * cosLat, lightLat - center.lat);
-          const priority = (isMajor ? 2.0 : 1.0) - distFromCenter * 15;
+          // Smooth zoom tiering based purely on static deterministic hash (no sudden pop on zoom!)
+          const minZoom = h0 >= 0.84 ? 11.4 : h0 >= 0.65 ? 13.3 : 14.8;
+          const staticPriority = (isMajor ? 2.0 : 0.0) + h0;
 
           this.lights.set(key, {
             key,
@@ -348,52 +329,27 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
             baseRadiusMeters,
             color,
             boost,
-            priority,
+            minZoom,
+            staticPriority,
             createdAt: now,
-            lastSeenAt: now,
-            exitingAt: null,
           });
-          didChange = true;
+          didAdd = true;
         }
       }
     }
 
-    // Smoothly fade out lights from different zoom tiers or outside padded bounds
-    const padLng = Math.max(0.002, (bounds.getEast() - bounds.getWest()) * 0.35);
-    const padLat = Math.max(0.002, (bounds.getNorth() - bounds.getSouth()) * 0.35);
-    const minLng = bounds.getWest() - padLng;
-    const maxLng = bounds.getEast() + padLng;
-    const minLat = bounds.getSouth() - padLat;
-    const maxLat = bounds.getNorth() + padLat;
-
-    for (const [key, entry] of this.lights.entries()) {
-      const wrongTier = !key.startsWith(`${cellTier}:`);
-      const outOfBounds =
-        entry.lng < minLng || entry.lng > maxLng || entry.lat < minLat || entry.lat > maxLat;
-      const stale = !seenInPass.has(key) && now - entry.lastSeenAt > 1200;
-
-      if (wrongTier || outOfBounds || stale) {
-        if (entry.exitingAt === null) {
-          entry.exitingAt = now;
-          didChange = true;
-        } else if (now - entry.exitingAt >= FADE_OUT_MS) {
-          this.lights.delete(key);
-          didChange = true;
-        }
-      }
-    }
-
-    // Hard memory cap if panning rapidly
+    // Hard memory cap if zooming far out over dense city grids
     if (this.lights.size > MAX_STORED_CELLS) {
-      const sorted = Array.from(this.lights.values()).sort((a, b) => a.lastSeenAt - b.lastSeenAt);
-      const excess = this.lights.size - MAX_STORED_CELLS;
-      for (let i = 0; i < excess; i++) {
-        this.lights.delete(sorted[i].key);
+      const sorted = Array.from(this.lights.values()).sort(
+        (a, b) => b.staticPriority - a.staticPriority
+      );
+      this.lights.clear();
+      for (let i = 0; i < MAX_STORED_CELLS; i++) {
+        this.lights.set(sorted[i].key, sorted[i]);
       }
-      didChange = true;
     }
 
-    if (didChange) {
+    if (didAdd) {
       map.triggerRepaint();
     }
   }
@@ -403,53 +359,65 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
       return;
     }
 
-    const now = performance.now();
     const zoom = this.map.getZoom();
     if (zoom < 11.2) return;
 
-    // Smooth macro zoom fade-in between z11.2 and z13.0
-    const zoomAlpha = Math.min(1.0, Math.max(0.0, (zoom - 11.2) / 1.8));
-    // Gentle radius compensation when zoomed out (z13..z16) so road pools remain useful at overview zoom
+    const now = performance.now();
+    const bounds = this.map.getBounds();
+    const viewPadLng = Math.max(0.001, (bounds.getEast() - bounds.getWest()) * 0.15);
+    const viewPadLat = Math.max(0.001, (bounds.getNorth() - bounds.getSouth()) * 0.15);
+    const vMinLng = bounds.getWest() - viewPadLng;
+    const vMaxLng = bounds.getEast() + viewPadLng;
+    const vMinLat = bounds.getSouth() - viewPadLat;
+    const vMaxLat = bounds.getNorth() + viewPadLat;
+
+    // Gentle radius compensation when zoomed out (z13..z16) so lit road pockets stay visible
     const zoomRadiusScale = Math.pow(2, Math.max(0, 16 - zoom) * 0.52);
 
-    const activeEntries: LightEntry[] = [];
+    const visibleEntries: { entry: LightEntry; alpha: number }[] = [];
     let needsFadeAnimation = false;
 
-    for (const [key, entry] of this.lights.entries()) {
-      if (entry.exitingAt !== null && now - entry.exitingAt >= FADE_OUT_MS) {
-        this.lights.delete(key);
+    for (const entry of this.lights.values()) {
+      if (
+        entry.lng < vMinLng ||
+        entry.lng > vMaxLng ||
+        entry.lat < vMinLat ||
+        entry.lat > vMaxLat
+      ) {
         continue;
       }
-      if (now - entry.createdAt < FADE_IN_MS || entry.exitingAt !== null) {
+
+      // Continuous zoom visibility: secondary lights fade in smoothly as user zooms in
+      const zoomVis = Math.min(1.0, Math.max(0.0, (zoom - entry.minZoom) / 0.85));
+      if (zoomVis <= 0.005) continue;
+
+      const fadeIn = Math.min(1.0, Math.max(0.0, (now - entry.createdAt) / FADE_IN_MS));
+      if (fadeIn < 1.0) {
         needsFadeAnimation = true;
       }
-      activeEntries.push(entry);
+
+      visibleEntries.push({
+        entry,
+        alpha: fadeIn * zoomVis * entry.boost,
+      });
     }
 
-    if (activeEntries.length === 0) return;
+    if (visibleEntries.length === 0) return;
 
-    // Enforce GPU budget cap prioritizing lights near center & along major roads
-    if (activeEntries.length > MAX_ACTIVE_LIGHTS) {
-      activeEntries.sort((a, b) => b.priority - a.priority);
-      activeEntries.length = MAX_ACTIVE_LIGHTS;
+    // Enforce GPU budget cap using static priority so panning never swaps nearby visible lights
+    if (visibleEntries.length > MAX_ACTIVE_LIGHTS) {
+      visibleEntries.sort((a, b) => b.entry.staticPriority - a.entry.staticPriority);
+      visibleEntries.length = MAX_ACTIVE_LIGHTS;
     }
 
     let floatOffset = 0;
     let quadCount = 0;
 
-    for (let i = 0; i < activeEntries.length; i++) {
-      const entry = activeEntries[i];
-      const fadeIn = Math.min(1.0, Math.max(0.0, (now - entry.createdAt) / FADE_IN_MS));
-      const fadeOut =
-        entry.exitingAt !== null
-          ? Math.max(0.0, 1.0 - (now - entry.exitingAt) / FADE_OUT_MS)
-          : 1.0;
-
-      const alpha = fadeIn * fadeOut * zoomAlpha * entry.boost;
-      if (alpha <= 0.005) continue;
-
+    for (let i = 0; i < visibleEntries.length; i++) {
+      const { entry, alpha } = visibleEntries[i];
       const mc = MercatorCoordinate.fromLngLat([entry.lng, entry.lat]);
-      const mercRadius = entry.baseRadiusMeters * zoomRadiusScale * mc.meterInMercatorCoordinateUnits();
+      const mercRadius =
+        entry.baseRadiusMeters * zoomRadiusScale * mc.meterInMercatorCoordinateUnits();
       const x0 = mc.x - mercRadius;
       const x1 = mc.x + mercRadius;
       const y0 = mc.y - mercRadius;
@@ -488,11 +456,7 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
     gl.uniformMatrix4fv(this.uMatrixLoc, false, matrix);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      this.vertexData.subarray(0, floatOffset),
-      gl.DYNAMIC_DRAW
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, this.vertexData.subarray(0, floatOffset), gl.DYNAMIC_DRAW);
 
     gl.enableVertexAttribArray(this.aPosLoc);
     gl.vertexAttribPointer(this.aPosLoc, 2, gl.FLOAT, false, stride, 0);
@@ -504,6 +468,7 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
     gl.vertexAttribPointer(this.aColorAlphaLoc, 4, gl.FLOAT, false, stride, 4 * 4);
 
     gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
     gl.disable(gl.DEPTH_TEST);
 
     // Pass 1: Multiplicative surface illumination — Dst * (1 + Light)
@@ -531,8 +496,8 @@ let activeLayerInstance: ViewportStreetLightingLayer | null = null;
 
 /**
  * Mounts or removes the viewport-culled WebGL street lighting illumination layer on dark map themes.
- * Lights are placed organically across roads currently visible on screen, softly illuminating
- * streets, intersections, and building edges inside circular pools without obstructing the route.
+ * Lights are fixed to deterministic roadside positions in the visible viewport and softly illuminate
+ * surrounding streets, intersections, and building edges in circular pools without flickering.
  */
 export function updateStreetLighting(map: MapLibreMap, mapStyle: MapStyle) {
   if (!isMapStyleReady(map)) return;
