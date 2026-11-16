@@ -8,6 +8,7 @@ import {
   MAP_STYLES,
   updateRouteLayer,
   updateStreetLighting,
+  STREET_LIGHTS_LAYER_ID,
   updateUserLocationMarker,
   syncUserMarkerHeadingRotation,
   getVisualMarkerState,
@@ -181,7 +182,7 @@ export const MapView: React.FC<Props> = ({
         indexedRouteRef.current,
         visual.routeDistMeters
       );
-      updateStreetLighting(map, routeRef.current, mapStyleRef.current);
+      updateStreetLighting(map, mapStyleRef.current);
     });
 
     map.on('style.load', () => {
@@ -194,7 +195,7 @@ export const MapView: React.FC<Props> = ({
         indexedRouteRef.current,
         visual.routeDistMeters
       );
-      updateStreetLighting(map, routeRef.current, mapStyleRef.current);
+      updateStreetLighting(map, mapStyleRef.current);
     });
 
     map.on('rotate', () => {
@@ -208,25 +209,26 @@ export const MapView: React.FC<Props> = ({
     // Re-apply route and ambient lights after style changes or tile loading completion
     const ensureRouteAndLightsMounted = () => {
       const style = (map as any)?.style;
-      if (!style || !style._loaded || !routeRef.current) return;
-
-      const sourceId = 'active-route-source';
-      if (!map.getSource(sourceId)) {
-        const visual = getVisualMarkerState();
-        updateRouteLayer(
-          map,
-          routeRef.current,
-          isNavigatingRef.current,
-          visual.pos || activeNavLocationRef.current,
-          indexedRouteRef.current,
-          visual.routeDistMeters
-        );
-      }
+      if (!style || !style._loaded) return;
 
       const isDark = mapStyleRef.current === 'dark' || mapStyleRef.current === 'midnight';
-      const lightsSourceId = 'street-lights-source';
-      if (isDark && !map.getSource(lightsSourceId)) {
-        updateStreetLighting(map, routeRef.current, mapStyleRef.current);
+      if (isDark && !map.getLayer(STREET_LIGHTS_LAYER_ID)) {
+        updateStreetLighting(map, mapStyleRef.current);
+      }
+
+      if (routeRef.current) {
+        const sourceId = 'active-route-source';
+        if (!map.getSource(sourceId)) {
+          const visual = getVisualMarkerState();
+          updateRouteLayer(
+            map,
+            routeRef.current,
+            isNavigatingRef.current,
+            visual.pos || activeNavLocationRef.current,
+            indexedRouteRef.current,
+            visual.routeDistMeters
+          );
+        }
       }
     };
 
@@ -375,7 +377,7 @@ export const MapView: React.FC<Props> = ({
       indexedRoute,
       isNavigating ? (activeNavRouteDist === null ? null : visual.routeDistMeters) : null
     );
-    updateStreetLighting(map, route, mapStyle);
+    updateStreetLighting(map, mapStyle);
 
     if (route && !isNavigating) {
       const destKey = `${route.destinationName}-${route.endPoint[0].toFixed(5)}-${route.endPoint[1].toFixed(5)}`;
