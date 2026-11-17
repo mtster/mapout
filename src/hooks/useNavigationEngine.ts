@@ -23,8 +23,8 @@ interface UseNavigationEngineParams {
   setRoute: React.Dispatch<React.SetStateAction<RouteData | null>>;
   selectedDestination: PlaceResult | null;
   travelMode: TravelMode;
-  setRemainingDistance: (dist: number) => void;
-  setRemainingDuration: (dur: number) => void;
+  setRemainingDistance: React.Dispatch<React.SetStateAction<number>>;
+  setRemainingDuration: React.Dispatch<React.SetStateAction<number>>;
   setTargetArrivalTimestamp: (ts: number | null) => void;
   setIsCenteredOnUser: (centered: boolean) => void;
 }
@@ -239,11 +239,19 @@ export function useNavigationEngine({
           }
         }
 
+        const roundedSpeed = Math.round(speedKmh);
+        const curRoute = routeRef.current;
+
+        const prevDisplayCoords = prevGpsCoordsRef.current;
+        const rawShiftMeters = prevDisplayCoords
+          ? calculateHaversineDistance(prevDisplayCoords, rawCoords)
+          : 999;
+
         prevGpsCoordsRef.current = rawCoords;
         prevGpsTimestampRef.current = nowMs;
-        setCurrentSpeed(speedKmh);
+        setCurrentSpeed((prev) => (Math.round(prev) === roundedSpeed ? prev : speedKmh));
 
-        const currentRoute = routeRef.current;
+        const currentRoute = curRoute;
         const dest = selectedDestinationRef.current;
         let indexed = indexedRouteRef.current;
         if (!indexed && currentRoute?.geometry) {
@@ -311,30 +319,51 @@ export function useNavigationEngine({
             roadHeading = userHeading;
           }
 
-          setActiveNavLocation(displayPos);
-          setActiveNavRouteDist(routeDist);
+          // Skip redundant React renders when parked / stopped at traffic light and snapped position hasn't moved
+          setActiveNavLocation((prev) => {
+            if (
+              prev &&
+              Math.abs(prev[0] - displayPos[0]) < 1e-6 &&
+              Math.abs(prev[1] - displayPos[1]) < 1e-6
+            ) {
+              return prev;
+            }
+            return displayPos;
+          });
+          setActiveNavRouteDist((prev) => {
+            if (prev !== null && routeDist !== null && Math.abs(prev - routeDist) < 0.35) {
+              return prev;
+            }
+            return routeDist;
+          });
 
           if (roadHeading !== null && !isNaN(roadHeading)) {
             if (speedKmh > 2 || currentNavHeadingRef.current === null) {
-              setCurrentNavHeading(roadHeading);
-              currentNavHeadingRef.current = roadHeading;
+              const prevH = currentNavHeadingRef.current;
+              if (prevH === null || Math.abs(getShortestAngleDiff(prevH, roadHeading)) >= 1.0) {
+                setCurrentNavHeading(roadHeading);
+                currentNavHeadingRef.current = roadHeading;
+              }
             }
           }
 
-          setUserLocation({
-            lat: rawCoords[0],
-            lng: rawCoords[1],
-            heading: roadHeading ?? undefined,
-            speed: speedKmh,
-            accuracy: pos.coords.accuracy,
-          });
+          if (rawShiftMeters >= 0.8 || speedKmh >= 1.5) {
+            setUserLocation({
+              lat: rawCoords[0],
+              lng: rawCoords[1],
+              heading: roadHeading ?? undefined,
+              speed: speedKmh,
+              accuracy: pos.coords.accuracy,
+            });
+          }
 
           // 4. Local ETA & Distance Update without API calls
-          setRemainingDistance(snap.remainingDistanceMeters);
+          const nextRemDist = snap.remainingDistanceMeters;
           const totalDist = indexed.totalMeters > 0 ? indexed.totalMeters : currentRoute.distance;
-          const progressFraction = totalDist > 0 ? snap.remainingDistanceMeters / totalDist : 0;
+          const progressFraction = totalDist > 0 ? nextRemDist / totalDist : 0;
           const remDur = Math.max(0, Math.round(currentRoute.duration * progressFraction));
-          setRemainingDuration(remDur);
+          setRemainingDistance((prev) => (Math.round(prev) === Math.round(nextRemDist) ? prev : nextRemDist));
+          setRemainingDuration((prev) => (prev === remDur ? prev : remDur));
 
           // 5. Intelligent Safe Auto-Rerouting (Anti-thrashing with distance & cooldown thresholds)
           const distSinceLastReroute = lastRerouteCoordsRef.current

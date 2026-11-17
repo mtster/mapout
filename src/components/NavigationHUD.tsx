@@ -72,7 +72,7 @@ export const NavigationHUD: React.FC<Props> = ({
         className="fixed top-3 left-3 right-3 sm:left-6 sm:right-auto sm:w-[420px] z-[1300] text-white pointer-events-auto"
         style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
       >
-        <div className="rounded-3xl bg-zinc-950/95 backdrop-blur-3xl border border-white/15 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.85)] flex flex-col gap-2.5">
+        <div className="rounded-3xl bg-zinc-950/95 backdrop-blur-md border border-white/15 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.85)] flex flex-col gap-2.5">
           {/* Main Maneuver Row */}
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-white/10 flex items-center justify-center shrink-0 shadow-inner">
@@ -154,7 +154,7 @@ export const NavigationHUD: React.FC<Props> = ({
       {/* Bottom Navigation Dashboard HUD: Flush docked to bottom edge to eliminate blank bottom space */}
       <div
         id="nav-bottom-hud"
-        className="fixed bottom-0 left-0 right-0 z-[1300] pointer-events-auto bg-zinc-950/95 backdrop-blur-3xl border-t border-white/15 shadow-[0_-12px_48px_rgba(0,0,0,0.95)] sm:left-6 sm:right-auto sm:w-[450px] sm:bottom-4 sm:rounded-3xl sm:border"
+        className="fixed bottom-0 left-0 right-0 z-[1300] pointer-events-auto bg-zinc-950/95 backdrop-blur-md border-t border-white/15 shadow-[0_-12px_48px_rgba(0,0,0,0.95)] sm:left-6 sm:right-auto sm:w-[450px] sm:bottom-4 sm:rounded-3xl sm:border"
         style={{
           paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)',
           paddingTop: '12px',

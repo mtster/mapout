@@ -38,6 +38,9 @@ export const SearchBar: React.FC<Props> = ({
   const [hasInteracted, setHasInteracted] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const prevQueryLenRef = useRef(0);
+  const isDeletingRef = useRef(false);
   const searchSeqRef = useRef(0);
 
   const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
@@ -55,25 +58,34 @@ export const SearchBar: React.FC<Props> = ({
   useEffect(() => {
     if (selectedDestination) {
       setQuery(selectedDestination.name);
+      prevQueryLenRef.current = selectedDestination.name.length;
+      isDeletingRef.current = false;
       setHasInteracted(false);
       setIsSearching(false);
       setIsOpen(false);
     } else {
       setQuery('');
+      prevQueryLenRef.current = 0;
+      isDeletingRef.current = false;
       setHasInteracted(false);
       setIsSearching(false);
       setResults([]);
     }
   }, [selectedDestination]);
 
-  // Debounced search with sequence tracking: cancels prior timers on every keystroke
-  // and only triggers network search after user pauses typing for 380ms
+  // Adaptive debounced search with AbortController cancellation:
+  // Cancels any pending timers AND active network requests on every keystroke/backspace.
+  // Uses a longer window (750ms) during deletion bursts so holding Backspace never fires halfway through erasing.
   useEffect(() => {
     if (!hasInteracted) return;
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
 
     const trimmed = query.trim();
@@ -83,27 +95,44 @@ export const SearchBar: React.FC<Props> = ({
       return;
     }
 
+    const debounceMs = isDeletingRef.current ? 750 : 450;
+
     debounceTimerRef.current = setTimeout(async () => {
       const currentSeq = ++searchSeqRef.current;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       setIsSearching(true);
       try {
-        const places = await searchPlaces(trimmed, userLocationRef.current || undefined);
-        if (currentSeq === searchSeqRef.current) {
+        const places = await searchPlaces(
+          trimmed,
+          userLocationRef.current || undefined,
+          controller.signal
+        );
+        if (!controller.signal.aborted && currentSeq === searchSeqRef.current) {
           setResults(places);
         }
-      } catch (err) {
-        console.error('Search error:', err);
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.error('Search error:', err);
+        }
       } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
         if (currentSeq === searchSeqRef.current) {
           setIsSearching(false);
         }
       }
-    }, 380);
+    }, debounceMs);
 
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
     };
   }, [query, hasInteracted]);
@@ -120,15 +149,24 @@ export const SearchBar: React.FC<Props> = ({
   }, []);
 
   const handleSelect = (place: PlaceResult) => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     setQuery(place.name);
+    prevQueryLenRef.current = place.name.length;
+    isDeletingRef.current = false;
     setIsOpen(false);
     setResults([]);
     onSelectPlace(place);
   };
 
   const handleClear = () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     setQuery('');
+    prevQueryLenRef.current = 0;
+    isDeletingRef.current = false;
     setResults([]);
+    setIsSearching(false);
     setIsOpen(false);
     onClearDestination();
   };
@@ -165,7 +203,12 @@ export const SearchBar: React.FC<Props> = ({
           type="text"
           value={query}
           onChange={(e) => {
-            setQuery(e.target.value);
+            const nextVal = e.target.value;
+            const inputType = (e.nativeEvent as InputEvent | undefined)?.inputType || '';
+            isDeletingRef.current =
+              inputType.startsWith('delete') || nextVal.length < prevQueryLenRef.current;
+            prevQueryLenRef.current = nextVal.length;
+            setQuery(nextVal);
             setHasInteracted(true);
             setIsOpen(true);
           }}

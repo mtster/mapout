@@ -37,7 +37,9 @@ interface UserMarkerAnimationState {
   smoothedCadenceMs: number;
   speed: number;
   lastUpdateTimestamp: number;
+  lastRenderTime: number;
   lastFrameCallbackTime: number;
+  lastRouteSplitDist: number;
   onFrame: MarkerFrameCallback | null;
   // Unwrapped heading angle (degrees clockwise from True North)
   unwrappedHeading: number | null;
@@ -62,7 +64,9 @@ const markerAnimState: UserMarkerAnimationState = {
   smoothedCadenceMs: 950,
   speed: 0,
   lastUpdateTimestamp: 0,
+  lastRenderTime: 0,
   lastFrameCallbackTime: 0,
+  lastRouteSplitDist: -1,
   onFrame: null,
   unwrappedHeading: null,
 };
@@ -178,8 +182,12 @@ export function updateUserLocationMarker(
     el.style.width = '36px';
     el.style.height = '36px';
 
+    const pulseClass = isNavigating
+      ? 'accuracy-pulse absolute inset-0 rounded-full bg-sky-400/15 border border-sky-400/25'
+      : 'accuracy-pulse absolute inset-0 rounded-full bg-sky-500/25 animate-ping';
+
     el.innerHTML = `
-      <div class="accuracy-pulse absolute inset-0 rounded-full bg-sky-500/25 animate-ping"></div>
+      <div class="${pulseClass}"></div>
       <div class="heading-cone-wrapper absolute inset-0 flex items-start justify-center pointer-events-none opacity-0 transition-opacity duration-200" style="transform-origin: center center;">
         <div class="w-0 h-0 -mt-1.5 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[10px] border-b-sky-400 drop-shadow-[0_0_4px_rgba(56,189,248,0.85)]"></div>
       </div>
@@ -219,6 +227,17 @@ export function updateUserLocationMarker(
 
   const marker = userMarkerRef.current;
 
+    const pulseEl = marker.getElement().querySelector('.accuracy-pulse');
+    if (pulseEl) {
+      if (isNavigating) {
+        pulseEl.classList.remove('animate-ping', 'bg-sky-500/25');
+        pulseEl.classList.add('bg-sky-400/15', 'border', 'border-sky-400/25');
+      } else {
+        pulseEl.classList.add('animate-ping', 'bg-sky-500/25');
+        pulseEl.classList.remove('bg-sky-400/15', 'border', 'border-sky-400/25');
+      }
+    }
+
   if (!isNavigating) {
     // Idle mode: immediate update
     if (markerAnimState.rafId) {
@@ -231,6 +250,7 @@ export function updateUserLocationMarker(
     markerAnimState.targetLng = activeLoc[1];
     markerAnimState.targetLat = activeLoc[0];
     markerAnimState.lastUpdateTimestamp = 0;
+    markerAnimState.lastRouteSplitDist = -1;
     markerAnimState.routeKey = null;
     markerAnimState.mode = 'coords';
     syncUserMarkerHeadingRotation(map, userMarkerRef, heading);
@@ -262,6 +282,8 @@ export function updateUserLocationMarker(
       markerAnimState.targetDist = targetRouteDistMeters;
       markerAnimState.currentLat = pt[0];
       markerAnimState.currentLng = pt[1];
+      markerAnimState.lastRouteSplitDist = targetRouteDistMeters;
+      markerAnimState.lastFrameCallbackTime = now;
       marker.setLngLat([pt[1], pt[0]]);
       markerAnimState.onFrame?.(pt, targetRouteDistMeters);
       markerAnimState.lastUpdateTimestamp = now;
@@ -364,15 +386,28 @@ export function updateUserLocationMarker(
           shouldContinue = false;
         }
 
+        // Cap DOM marker updates to 60Hz on 120Hz ProMotion displays (cuts DOM commits by 50%)
+        if (shouldContinue && frameTime - markerAnimState.lastRenderTime < 15.5) {
+          markerAnimState.rafId = requestAnimationFrame(animateRouteGlide);
+          return;
+        }
+        markerAnimState.lastRenderTime = frameTime;
+
         const pt = getPointAtRouteDistance(activeIdxRoute, nextDist);
         markerAnimState.currentDist = nextDist;
         markerAnimState.currentLat = pt[0];
         markerAnimState.currentLng = pt[1];
         marker.setLngLat([pt[1], pt[0]]);
 
-        // Synchronize passed-route paling directly to the dot's visual route distance (throttled ~30fps)
-        if (!shouldContinue || frameTime - markerAnimState.lastFrameCallbackTime >= 33) {
+        // Synchronize passed-route paling directly under the dot, gated to >=220ms AND >=4m movement
+        // so MapLibre's GeoJSON Web Worker isn't thrashed 30 times per second.
+        const splitDistDelta = Math.abs(nextDist - markerAnimState.lastRouteSplitDist);
+        if (
+          (!shouldContinue && splitDistDelta >= 0.25) ||
+          (frameTime - markerAnimState.lastFrameCallbackTime >= 220 && splitDistDelta >= 4.0)
+        ) {
           markerAnimState.lastFrameCallbackTime = frameTime;
+          markerAnimState.lastRouteSplitDist = nextDist;
           markerAnimState.onFrame?.(pt, nextDist);
         }
 
@@ -474,6 +509,12 @@ export function updateUserLocationMarker(
           nextLat = markerAnimState.targetLat;
           shouldContinue = false;
         }
+
+        if (shouldContinue && frameTime - markerAnimState.lastRenderTime < 15.5) {
+          markerAnimState.rafId = requestAnimationFrame(animateCoordGlide);
+          return;
+        }
+        markerAnimState.lastRenderTime = frameTime;
 
         markerAnimState.currentLng = nextLng;
         markerAnimState.currentLat = nextLat;

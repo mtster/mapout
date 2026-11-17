@@ -20,9 +20,11 @@ const BEFORE_LAYER_CANDIDATES = [
 
 // Single permanent geographic grid (~100m blocks) so lights stay bolted to fixed real-world spots across all zooms
 const CELL_DEG = 0.00105;
-const MAX_ACTIVE_LIGHTS = 120;
-const MAX_STORED_CELLS = 260;
-const MOVE_SCAN_THROTTLE_MS = 450;
+const MAX_ACTIVE_LIGHTS = 72;
+const MAX_STORED_CELLS = 200;
+const MOVE_SCAN_THROTTLE_MS = 850;
+const MIN_SCAN_MOVE_DEG = 0.00032; // ~35 meters
+const MIN_SCAN_ZOOM_DELTA = 0.22;
 const FADE_IN_MS = 260;
 
 // Warm, restrained sodium/incandescent light tints (RGB 0..1)
@@ -37,7 +39,9 @@ interface LightEntry {
   key: string;
   lng: number;
   lat: number;
-  baseRadiusMeters: number;
+  mcX: number; // Cached Float64 Mercator X
+  mcY: number; // Cached Float64 Mercator Y
+  mercRadiusBase: number; // Cached Float64 baseRadiusMeters * meterInMercatorCoordinateUnits
   color: [number, number, number];
   boost: number;
   minZoom: number;
@@ -136,14 +140,18 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
 
   private lights = new Map<string, LightEntry>();
   private lastScanMs = 0;
+  private lastScanLng = 0;
+  private lastScanLat = 0;
+  private lastScanZoom = -1;
   private vertexData = new Float32Array(MAX_ACTIVE_LIGHTS * 6 * 8); // 6 verts/quad * 8 floats/vert
+  private relMatrix = new Float32Array(16);
   private isDestroyed = false;
 
   private boundThrottledScan = () => this.scanViewportRoads(false);
-  private boundImmediateScan = () => this.scanViewportRoads(true);
+  private boundMoveEndScan = () => this.scanViewportRoads(false, true);
   private boundSourceDataScan = (e: { sourceId?: string; isSourceLoaded?: boolean }) => {
     if (e.sourceId === 'openmaptiles' && e.isSourceLoaded) {
-      this.scanViewportRoads(false);
+      this.scanViewportRoads(true);
     }
   };
 
@@ -180,8 +188,8 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
     this.vertexBuffer = gl.createBuffer();
 
     map.on('move', this.boundThrottledScan);
-    map.on('moveend', this.boundImmediateScan);
-    map.on('zoomend', this.boundImmediateScan);
+    map.on('moveend', this.boundMoveEndScan);
+    map.on('zoomend', this.boundMoveEndScan);
     map.on('sourcedata', this.boundSourceDataScan);
 
     this.scanViewportRoads(true);
@@ -190,8 +198,8 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
   onRemove(map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
     this.isDestroyed = true;
     map.off('move', this.boundThrottledScan);
-    map.off('moveend', this.boundImmediateScan);
-    map.off('zoomend', this.boundImmediateScan);
+    map.off('moveend', this.boundMoveEndScan);
+    map.off('zoomend', this.boundMoveEndScan);
     map.off('sourcedata', this.boundSourceDataScan);
 
     if (this.vertexBuffer) {
@@ -206,12 +214,30 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
     this.map = null;
   }
 
-  private scanViewportRoads(force: boolean) {
+  private scanViewportRoads(force: boolean, isEndEvent = false) {
     if (this.isDestroyed || !this.map) return;
     const now = performance.now();
-    if (!force && now - this.lastScanMs < MOVE_SCAN_THROTTLE_MS) {
-      return;
+
+    if (!force) {
+      if (!isEndEvent && now - this.lastScanMs < MOVE_SCAN_THROTTLE_MS) {
+        return;
+      }
+
+      // Skip redundant queryRenderedFeatures if camera barely moved/zoomed (saves CPU & battery during navigation)
+      if (this.lights.size > 0 && this.lastScanZoom >= 0) {
+        const center = this.map.getCenter();
+        const zoom = this.map.getZoom();
+        const dLng = Math.abs(center.lng - this.lastScanLng);
+        const dLat = Math.abs(center.lat - this.lastScanLat);
+        const dZoom = Math.abs(zoom - this.lastScanZoom);
+        const minMove = isEndEvent ? MIN_SCAN_MOVE_DEG * 0.5 : MIN_SCAN_MOVE_DEG;
+        const minZoom = isEndEvent ? MIN_SCAN_ZOOM_DELTA * 0.6 : MIN_SCAN_ZOOM_DELTA;
+        if (dLng < minMove && dLat < minMove && dZoom < minZoom) {
+          return;
+        }
+      }
     }
+
     this.lastScanMs = now;
     this.populateFixedViewportLights(now);
   }
@@ -219,6 +245,12 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
   private populateFixedViewportLights(now: number) {
     const map = this.map;
     if (!map || !isMapStyleReady(map)) return;
+
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    this.lastScanLng = center.lng;
+    this.lastScanLat = center.lat;
+    this.lastScanZoom = zoom;
 
     const bounds = map.getBounds();
     const padLng = Math.max(0.003, (bounds.getEast() - bounds.getWest()) * 0.45);
@@ -235,7 +267,6 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
       }
     }
 
-    const zoom = map.getZoom();
     if (zoom < 11.2) return;
 
     const activeRoadLayers = ROAD_LAYER_IDS.filter((id) => Boolean(map.getLayer(id)));
@@ -250,7 +281,6 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
       return;
     }
 
-    const center = map.getCenter();
     const cosLat = Math.max(0.25, Math.cos((center.lat * Math.PI) / 180));
     let didAdd = false;
 
@@ -318,6 +348,10 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
           const baseRadiusMeters = 44 + hRadius * 24;
           const boost = 0.85 + hBoost * 0.35;
 
+          // Pre-compute Float64 Mercator coordinates & base radius once on creation
+          const mc = MercatorCoordinate.fromLngLat([lightLng, lightLat]);
+          const mercRadiusBase = baseRadiusMeters * mc.meterInMercatorCoordinateUnits();
+
           // Smooth zoom tiering based purely on static deterministic hash (no sudden pop on zoom!)
           const minZoom = h0 >= 0.84 ? 11.4 : h0 >= 0.65 ? 13.3 : 14.8;
           const staticPriority = (isMajor ? 2.0 : 0.0) + h0;
@@ -326,7 +360,9 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
             key,
             lng: lightLng,
             lat: lightLat,
-            baseRadiusMeters,
+            mcX: mc.x,
+            mcY: mc.y,
+            mercRadiusBase,
             color,
             boost,
             minZoom,
@@ -410,21 +446,39 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
       visibleEntries.length = MAX_ACTIVE_LIGHTS;
     }
 
+    // CAMERA-RELATIVE FLOAT64 TRANSFORM:
+    // Eliminates WebGL float32 catastrophic cancellation (multi-meter snapping / shaking during drag & navigation).
+    // All vertices are uploaded relative to the camera center in float64 precision, and column 3 of the MVP matrix
+    // is translated on the CPU in 64-bit precision before uploading to the shader.
+    const centerMc = MercatorCoordinate.fromLngLat(this.map.getCenter());
+    const refX = centerMc.x;
+    const refY = centerMc.y;
+
+    const rm = this.relMatrix;
+    for (let i = 0; i < 12; i++) {
+      rm[i] = matrix[i];
+    }
+    rm[12] = matrix[0] * refX + matrix[4] * refY + matrix[12];
+    rm[13] = matrix[1] * refX + matrix[5] * refY + matrix[13];
+    rm[14] = matrix[2] * refX + matrix[6] * refY + matrix[14];
+    rm[15] = matrix[3] * refX + matrix[7] * refY + matrix[15];
+
     let floatOffset = 0;
     let quadCount = 0;
+    const d = this.vertexData;
 
     for (let i = 0; i < visibleEntries.length; i++) {
       const { entry, alpha } = visibleEntries[i];
-      const mc = MercatorCoordinate.fromLngLat([entry.lng, entry.lat]);
-      const mercRadius =
-        entry.baseRadiusMeters * zoomRadiusScale * mc.meterInMercatorCoordinateUnits();
-      const x0 = mc.x - mercRadius;
-      const x1 = mc.x + mercRadius;
-      const y0 = mc.y - mercRadius;
-      const y1 = mc.y + mercRadius;
+      const relX = entry.mcX - refX;
+      const relY = entry.mcY - refY;
+      const mercRadius = entry.mercRadiusBase * zoomRadiusScale;
+
+      const x0 = relX - mercRadius;
+      const x1 = relX + mercRadius;
+      const y0 = relY - mercRadius;
+      const y1 = relY + mercRadius;
 
       const [r, g, b] = entry.color;
-      const d = this.vertexData;
 
       // Triangle 1: (x0,y0), (x1,y0), (x0,y1)
       d[floatOffset++] = x0; d[floatOffset++] = y0; d[floatOffset++] = -1; d[floatOffset++] = -1;
@@ -453,7 +507,7 @@ class ViewportStreetLightingLayer implements CustomLayerInterface {
 
     const stride = 8 * 4;
     gl.useProgram(this.program);
-    gl.uniformMatrix4fv(this.uMatrixLoc, false, matrix);
+    gl.uniformMatrix4fv(this.uMatrixLoc, false, rm);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.vertexData.subarray(0, floatOffset), gl.DYNAMIC_DRAW);

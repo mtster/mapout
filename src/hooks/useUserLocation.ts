@@ -10,9 +10,11 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
 
   const hasCenteredOnUserRef = useRef(false);
   const isNavigationActiveRef = useRef(false);
+  const [isNavActive, setIsNavActive] = useState(false);
 
   const setIsNavigationActive = useCallback((active: boolean) => {
     isNavigationActiveRef.current = active;
+    setIsNavActive(active);
   }, []);
 
   // Initial Location detection and continuous GPS watching
@@ -109,13 +111,12 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
     requestLocation(false);
   }, [requestLocation]);
 
-  // Continuously update user location in background when not actively navigating
+  // Continuously update user location in background ONLY when not actively navigating
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation || isNavActive) return;
 
     const globalWatchId = navigator.geolocation.watchPosition(
       (pos) => {
-        // Yield to active navigation engine so dual watchPosition callbacks never fight
         if (isNavigationActiveRef.current) return;
 
         const coords: UserLocation = {
@@ -146,7 +147,7 @@ export function useUserLocation(mapInstance: MapLibreMap | null) {
     return () => {
       navigator.geolocation.clearWatch(globalWatchId);
     };
-  }, [mapInstance, requestLocation]);
+  }, [mapInstance, isNavActive]);
 
   return {
     userLocation,

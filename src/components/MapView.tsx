@@ -506,9 +506,9 @@ export const MapView: React.FC<Props> = ({
       activeNavLocation || (userLocation ? [userLocation.lat, userLocation.lng] : null);
     if (!targetCoord) return;
 
-    const camKey = `${targetCoord[0].toFixed(6)},${targetCoord[1].toFixed(6)},${
-      typeof targetHeading === 'number' ? Math.round(targetHeading) : 'null'
-    },${standardNavZoom}`;
+    // Quantize key (~1.1m pos, 2-deg heading) so tiny parked GPS jitter doesn't trigger endless easeTo repaint loops
+    const qHeading = typeof targetHeading === 'number' ? Math.round(targetHeading / 2) * 2 : 'null';
+    const camKey = `${targetCoord[0].toFixed(5)},${targetCoord[1].toFixed(5)},${qHeading},${standardNavZoom}`;
     if (lastFollowCameraKeyRef.current === camKey) return;
     lastFollowCameraKeyRef.current = camKey;
 
